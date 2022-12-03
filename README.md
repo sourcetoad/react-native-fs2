@@ -1,14 +1,7 @@
-# react-native-fs
+# react-native-fs2
+_A fork of [react-native-fs](https://github.com/itinance/react-native-fs) with a smaller footprint and fixes due to the upstream library seemingly being abandoned._
 
-Native filesystem access for react-native
-
-## IMPORTANT
-
-For RN < 0.57 and/or Gradle < 3 you MUST install react-native-fs at version @2.11.17!
-
-For RN >= 0.57 and/or Gradle >= 3 you MUST install react-native-fs at version >= @2.13.2!
-
-For RN >= 0.61 please install react-native-fs at version >= @2.16.0!
+ * todo
 
 ## Table of Contents
 1. [Changelog](#Changelog)
