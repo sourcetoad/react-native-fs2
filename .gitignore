@@ -30,3 +30,7 @@ android/local.properties
 android/.settings
 android/.project
 Session.vim
+
+
+# Bob
+lib/
