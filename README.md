@@ -15,7 +15,6 @@ For RN >= 0.61 please install react-native-fs at version >= @2.16.0!
 1. Usage
     1. [iOS](#usage-ios)
     1. [Android](#usage-android)
-    1. [Windows](#usage-windows)
 1. [Examples](#Examples)
 1. [API](#API)
 1. [Background Downloads Tutorial (iOS)](#background-downloads-tutorial-ios)
@@ -160,20 +159,6 @@ public class MainApplication extends Application implements ReactApplication {
       );
     }
 ```
-
-## Usage (Windows)
-
-### Adding automatically with react-native link
-
-The `link` command also works for adding the native dependency on Windows:
-
-`react-native link react-native-fs`
-
-### Adding Manually in Visual Studio
-
-Follow the instructions in the ['Linking Libraries'](https://github.com/Microsoft/react-native-windows/blob/master/docs/LinkingLibrariesWindows.md) documentation on the react-native-windows GitHub repo. For the first step of adding the project to the Visual Studio solution file, the path to the project should be `../node_modules/react-native-fs/windows/RNFS/RNFS.csproj`.
-
-## Examples
 
 ### Basic
 
