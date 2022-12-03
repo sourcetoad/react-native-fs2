@@ -58,7 +58,6 @@ public class RNFSManager extends ReactContextBaseJavaModule {
   private static final String RNFSFileTypeDirectory = "RNFSFileTypeDirectory";
 
   private SparseArray<Downloader> downloaders = new SparseArray<>();
-  private SparseArray<Uploader> uploaders = new SparseArray<>();
 
   private ReactApplicationContext reactContext;
 
@@ -788,92 +787,6 @@ public class RNFSManager extends ReactContextBaseJavaModule {
 
     if (downloader != null) {
       downloader.stop();
-    }
-  }
-
-  @ReactMethod
-  public void uploadFiles(final ReadableMap options, final Promise promise) {
-    try {
-      ReadableArray files = options.getArray("files");
-      URL url = new URL(options.getString("toUrl"));
-      final int jobId = options.getInt("jobId");
-      ReadableMap headers = options.getMap("headers");
-      ReadableMap fields = options.getMap("fields");
-      String method = options.getString("method");
-      boolean binaryStreamOnly = options.getBoolean("binaryStreamOnly");
-      boolean hasBeginCallback = options.getBoolean("hasBeginCallback");
-      boolean hasProgressCallback = options.getBoolean("hasProgressCallback");
-
-      ArrayList<ReadableMap> fileList = new ArrayList<>();
-      UploadParams params = new UploadParams();
-      for(int i =0;i<files.size();i++){
-        fileList.add(files.getMap(i));
-      }
-      params.src = url;
-      params.files =fileList;
-      params.headers = headers;
-      params.method = method;
-      params.fields = fields;
-      params.binaryStreamOnly = binaryStreamOnly;
-      params.onUploadComplete = new UploadParams.onUploadComplete() {
-        public void onUploadComplete(UploadResult res) {
-          if (res.exception == null) {
-            WritableMap infoMap = Arguments.createMap();
-
-            infoMap.putInt("jobId", jobId);
-            infoMap.putInt("statusCode", res.statusCode);
-            infoMap.putMap("headers",res.headers);
-            infoMap.putString("body",res.body);
-            promise.resolve(infoMap);
-          } else {
-            reject(promise, options.getString("toUrl"), res.exception);
-          }
-        }
-      };
-
-      if (hasBeginCallback) {
-        params.onUploadBegin = new UploadParams.onUploadBegin() {
-          public void onUploadBegin() {
-            WritableMap data = Arguments.createMap();
-
-            data.putInt("jobId", jobId);
-
-            sendEvent(getReactApplicationContext(), "UploadBegin", data);
-          }
-        };
-      }
-
-      if (hasProgressCallback) {
-        params.onUploadProgress = new UploadParams.onUploadProgress() {
-          public void onUploadProgress(int totalBytesExpectedToSend,int totalBytesSent) {
-            WritableMap data = Arguments.createMap();
-
-            data.putInt("jobId", jobId);
-            data.putInt("totalBytesExpectedToSend", totalBytesExpectedToSend);
-            data.putInt("totalBytesSent", totalBytesSent);
-
-            sendEvent(getReactApplicationContext(), "UploadProgress", data);
-          }
-        };
-      }
-
-      Uploader uploader = new Uploader();
-
-      uploader.execute(params);
-
-      this.uploaders.put(jobId, uploader);
-    } catch (Exception ex) {
-      ex.printStackTrace();
-      reject(promise, options.getString("toUrl"), ex);
-    }
-  }
-
-  @ReactMethod
-  public void stopUpload(int jobId) {
-    Uploader uploader = this.uploaders.get(jobId);
-
-    if (uploader != null) {
-      uploader.stop();
     }
   }
 
