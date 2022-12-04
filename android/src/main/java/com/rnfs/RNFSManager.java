@@ -15,7 +15,6 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
@@ -55,7 +54,7 @@ public class RNFSManager extends ReactContextBaseJavaModule {
 
   private SparseArray<Downloader> downloaders = new SparseArray<>();
 
-  private ReactApplicationContext reactContext;
+  private final ReactApplicationContext reactContext;
 
   public RNFSManager(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -470,8 +469,8 @@ public class RNFSManager extends ReactContextBaseJavaModule {
 
   private void sendEvent(ReactContext reactContext, String eventName, WritableMap params) {
     reactContext
-            .getJSModule(RCTNativeAppEventEmitter.class)
-            .emit(eventName, params);
+      .getJSModule(RCTNativeAppEventEmitter.class)
+      .emit(eventName, params);
   }
 
   @ReactMethod
@@ -628,7 +627,7 @@ public class RNFSManager extends ReactContextBaseJavaModule {
       new MediaScannerConnection.MediaScannerConnectionClient() {
         @Override
         public void onMediaScannerConnected() {}
-         @Override
+        @Override
         public void onScanCompleted(String path, Uri uri) {
           promise.resolve(path);
         }
