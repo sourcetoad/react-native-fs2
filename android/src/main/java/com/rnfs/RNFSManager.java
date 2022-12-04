@@ -404,12 +404,14 @@ public class RNFSManager extends ReactContextBaseJavaModule {
 
   private class CopyFileTask extends AsyncTask<String, Void, Exception> {
     protected Exception doInBackground(String... paths) {
+      InputStream in = null;
+      OutputStream out = null;
       try {
         String filepath = paths[0];
         String destPath = paths[1];
 
-        InputStream in = getInputStream(filepath);
-        OutputStream out = getOutputStream(destPath, false);
+        in = getInputStream(filepath);
+        out = getOutputStream(destPath, false);
 
         byte[] buffer = new byte[1024];
         int length;
@@ -420,12 +422,14 @@ public class RNFSManager extends ReactContextBaseJavaModule {
       } catch (Exception ex) {
         return ex;
       } finally {
-        if (in != null) {
-          in.close();
-        }
-        if (out != null) {
-          out.close();
-        }
+        try {
+          if (in != null) {
+            in.close();
+          }
+          if (out != null) {
+            out.close();
+          }
+        } catch (Exception ignored) { }
       }
     }
   }
