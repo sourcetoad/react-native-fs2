@@ -1,7 +1,5 @@
 package com.rnfs;
 
-import android.content.res.AssetFileDescriptor;
-import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
@@ -34,7 +32,6 @@ import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -587,20 +584,11 @@ public class RNFSManager extends ReactContextBaseJavaModule {
     File path = Environment.getDataDirectory();
     StatFs stat = new StatFs(path.getPath());
     StatFs statEx = new StatFs(Environment.getExternalStorageDirectory().getPath());
-    long totalSpace;
-    long freeSpace;
-    long totalSpaceEx = 0;
-    long freeSpaceEx = 0;
-    if (android.os.Build.VERSION.SDK_INT >= 18) {
-      totalSpace = stat.getTotalBytes();
-      freeSpace = stat.getFreeBytes();
-      totalSpaceEx = statEx.getTotalBytes();
-      freeSpaceEx = statEx.getFreeBytes();
-    } else {
-      long blockSize = stat.getBlockSize();
-      totalSpace = blockSize * stat.getBlockCount();
-      freeSpace = blockSize * stat.getAvailableBlocks();
-    }
+    long totalSpace = stat.getTotalBytes();
+    long freeSpace = stat.getFreeBytes();
+    long totalSpaceEx = statEx.getTotalBytes();
+    long freeSpaceEx = statEx.getFreeBytes();
+
     WritableMap info = Arguments.createMap();
     info.putDouble("totalSpace", (double) totalSpace);   // Int32 too small, must use Double
     info.putDouble("freeSpace", (double) freeSpace);
