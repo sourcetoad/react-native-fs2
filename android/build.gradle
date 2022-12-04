@@ -3,13 +3,16 @@ def safeExtGet(prop, fallback) {
 }
 
 buildscript {
+  // Only need dependencies when building in isolation. As a library we can assume repos from parent.
+  if (project == rootProject) {
     repositories {
-        mavenCentral()
+      google()
+      mavenCentral()
     }
-
     dependencies {
-        classpath 'com.android.tools.build:gradle:1.5.0'
+      classpath("com.android.tools.build:gradle:7.2.1")
     }
+  }
 }
 
 apply plugin: 'com.android.library'
