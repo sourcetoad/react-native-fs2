@@ -251,53 +251,8 @@ const RNFS = {
     );
   },
 
-  // Android only
-  readFileAssets(filepath: string, encodingOrOptions?: any): Promise<string> {
-    if (!RNFSManager.readFileAssets) {
-      throw new Error('readFileAssets is not available on this platform');
-    }
-    return readFileGeneric(
-      filepath,
-      encodingOrOptions,
-      RNFSManager.readFileAssets
-    );
-  },
-
-  // Android only
-  readFileRes(filename: string, encodingOrOptions?: any): Promise<string> {
-    if (!RNFSManager.readFileRes) {
-      throw new Error('readFileRes is not available on this platform');
-    }
-    return readFileGeneric(
-      filename,
-      encodingOrOptions,
-      RNFSManager.readFileRes
-    );
-  },
-
   hash(filepath: string, algorithm: string): Promise<string> {
     return RNFSManager.hash(normalizeFilePath(filepath), algorithm);
-  },
-
-  // Android only
-  copyFileAssets(filepath: string, destPath: string) {
-    if (!RNFSManager.copyFileAssets) {
-      throw new Error('copyFileAssets is not available on this platform');
-    }
-    return RNFSManager.copyFileAssets(
-      normalizeFilePath(filepath),
-      normalizeFilePath(destPath)
-    ).then(() => void 0);
-  },
-
-  // Android only
-  copyFileRes(filename: string, destPath: string) {
-    if (!RNFSManager.copyFileRes) {
-      throw new Error('copyFileRes is not available on this platform');
-    }
-    return RNFSManager.copyFileRes(filename, normalizeFilePath(destPath)).then(
-      () => void 0
-    );
   },
 
   writeFile(
