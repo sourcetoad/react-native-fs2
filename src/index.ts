@@ -35,18 +35,6 @@ const getJobId = () => {
 const normalizeFilePath = (path: string) =>
   path.startsWith('file://') ? path.slice(7) : path;
 
-function readFileGeneric(
-  filepath: string,
-  encodingOrOptions: EncodingOrOptions,
-  command: Function
-) {
-  const options = parseOptions(encodingOrOptions);
-
-  return command(normalizeFilePath(filepath)).then((b64: string) => {
-    return encodeContents(b64, options.encoding);
-  });
-}
-
 function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
   let options = {
     encoding: 'utf8' as Encoding,
@@ -205,8 +193,17 @@ const RNFS = {
     );
   },
 
-  readFile(filepath: string, encodingOrOptions?: any): Promise<string> {
-    return readFileGeneric(filepath, encodingOrOptions, RNFSManager.readFile);
+  readFile(
+    filepath: string,
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<string> {
+    const options = parseOptions(encodingOrOptions);
+
+    return RNFSManager.readFile(normalizeFilePath(filepath)).then(
+      (b64: string) => {
+        return encodeContents(b64, options.encoding);
+      }
+    );
   },
 
   read(
@@ -355,11 +352,13 @@ const RNFS = {
 
   MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
   CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,
-  ExternalCachesDirectoryPath: RNFSManager.RNFSExternalCachesDirectoryPath as String,
+  ExternalCachesDirectoryPath:
+    RNFSManager.RNFSExternalCachesDirectoryPath as String,
   DocumentDirectoryPath: RNFSManager.RNFSDocumentDirectoryPath as String,
   DownloadDirectoryPath: RNFSManager.RNFSDownloadDirectoryPath as String,
   ExternalDirectoryPath: RNFSManager.RNFSExternalDirectoryPath as String,
-  ExternalStorageDirectoryPath: RNFSManager.RNFSExternalStorageDirectoryPath as String,
+  ExternalStorageDirectoryPath:
+    RNFSManager.RNFSExternalStorageDirectoryPath as String,
   TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
   LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
   PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
