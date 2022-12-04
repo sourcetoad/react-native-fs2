@@ -2,9 +2,30 @@
   "name": "react-native-fs2",
   "version": "2.20.0",
   "description": "Native filesystem access for react-native",
-  "main": "FS.common.js",
-  "typings": "index.d.ts",
+  "react-native": "src/index",
+  "types": "lib/typescript/src/types.ts",
+  "main": "lib/commonjs/index",
+  "module": "lib/module/index",
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "*.podspec",
+    "!lib/typescript/example",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
   "scripts": {
+    "prepare": "bob build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "flow": "flow; test $? -eq 0 -o $? -eq 2"
   },
@@ -23,18 +44,36 @@
     "upload",
     "file-transfer"
   ],
-  "author": "Johannes Lumpe <johannes@lum.pe> (https://github.com/johanneslumpe)",
+  "contributors": [
+    "Johannes Lumpe <johannes@lum.pe> (https://github.com/johanneslumpe)",
+    "Hagen Hübel <hhuebel@itinance.com> (https://github.com/itinance)"
+  ],
   "license": "MIT",
   "dependencies": {
-    "base-64": "^0.1.0",
+    "base-64": "^1.0.0",
     "utf8": "^3.0.0"
   },
   "devDependencies": {
+    "@react-native-community/bob": "^0.17.1",
+    "@types/base-64": "^1.0.0",
+    "@types/react": "^18.0.26",
+    "@types/react-native": "^0.70.7",
+    "@types/utf8": "^3.0.1",
     "create-react-class": "15.6.3",
     "flow-bin": "^0.109.0",
-    "prop-types": "^15.7.2"
+    "prop-types": "^15.7.2",
+    "typescript": "^4.9.3"
   },
   "peerDependencies": {
     "react-native": "*"
+  },
+  "@react-native-community/bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      "commonjs",
+      "module",
+      "typescript"
+    ]
   }
 }
