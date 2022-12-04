@@ -179,32 +179,8 @@ const RNFS = {
     return RNFSManager.completeHandlerIOS(jobId);
   },
 
-  readDir(dirpath: string): Promise<ReadDirItem[]> {
-    return readDirGeneric(dirpath, RNFSManager.readDir);
-  },
-
-  // Android-only
-  readDirAssets(dirpath: string): Promise<ReadDirItem[]> {
-    if (!RNFSManager.readDirAssets) {
-      throw new Error('readDirAssets is not available on this platform');
-    }
-    return readDirGeneric(dirpath, RNFSManager.readDirAssets);
-  },
-
-  // Android-only
-  existsAssets(filepath: string) {
-    if (!RNFSManager.existsAssets) {
-      throw new Error('existsAssets is not available on this platform');
-    }
-    return RNFSManager.existsAssets(filepath);
-  },
-
-  // Android-only
-  existsRes(filename: string) {
-    if (!RNFSManager.existsRes) {
-      throw new Error('existsRes is not available on this platform');
-    }
-    return RNFSManager.existsRes(filename);
+  readDir(dirPath: string): Promise<ReadDirItem[]> {
+    return readDirGeneric(dirPath, RNFSManager.readDir);
   },
 
   // Node style version (lowercase d). Returns just the names
