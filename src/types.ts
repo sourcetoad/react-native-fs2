@@ -19,7 +19,7 @@ export type ReadDirItem = {
 
 export type StatResult = {
   type: any; // TODO
-  name: string | undefined; // The name of the item TODO: why is this not documented?
+  name: string | undefined; // The name of the item
   path: string; // The absolute path to the item
   size: number; // Size in bytes
   mode: number; // UNIX file mode
