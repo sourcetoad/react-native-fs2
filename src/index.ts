@@ -344,9 +344,9 @@ const RNFS = {
     contents: string,
     encodingOrOptions?: any
   ): Promise<void> {
-    var b64;
+    let b64;
 
-    var options = {
+    let options = {
       encoding: 'utf8',
     };
 
@@ -377,9 +377,9 @@ const RNFS = {
     position?: number,
     encodingOrOptions?: any
   ): Promise<void> {
-    var b64;
+    let b64;
 
-    var options = {
+    let options = {
       encoding: 'utf8',
     };
 
