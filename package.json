@@ -12,6 +12,7 @@
     "android",
     "ios",
     "*.podspec",
+    "!example",
     "!lib/typescript/example",
     "!ios/build",
     "!android/build",
@@ -105,7 +106,12 @@
     "targets": [
       "commonjs",
       "module",
-      "typescript"
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
     ]
   }
 }

@@ -17,7 +17,7 @@ import type {
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
-} from 'types';
+} from './types';
 
 const RNFSManager = NativeModules.RNFSManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
@@ -353,17 +353,17 @@ const RNFS = {
     return RNFSManager.scanFile(path);
   },
 
-  MainBundlePath: RNFSManager.RNFSMainBundlePath,
-  CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath,
-  ExternalCachesDirectoryPath: RNFSManager.RNFSExternalCachesDirectoryPath,
-  DocumentDirectoryPath: RNFSManager.RNFSDocumentDirectoryPath,
-  DownloadDirectoryPath: RNFSManager.RNFSDownloadDirectoryPath,
-  ExternalDirectoryPath: RNFSManager.RNFSExternalDirectoryPath,
-  ExternalStorageDirectoryPath: RNFSManager.RNFSExternalStorageDirectoryPath,
-  TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath,
-  LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath,
-  PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath,
-  FileProtectionKeys: RNFSManager.RNFSFileProtectionKeys,
+  MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
+  CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,
+  ExternalCachesDirectoryPath: RNFSManager.RNFSExternalCachesDirectoryPath as String,
+  DocumentDirectoryPath: RNFSManager.RNFSDocumentDirectoryPath as String,
+  DownloadDirectoryPath: RNFSManager.RNFSDownloadDirectoryPath as String,
+  ExternalDirectoryPath: RNFSManager.RNFSExternalDirectoryPath as String,
+  ExternalStorageDirectoryPath: RNFSManager.RNFSExternalStorageDirectoryPath as String,
+  TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
+  LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
+  PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
+  FileProtectionKeys: RNFSManager.RNFSFileProtectionKeys as String,
 };
 
 export default RNFS;
