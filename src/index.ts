@@ -14,6 +14,9 @@ import type {
   StatResult,
   DownloadFileOptions,
   DownloadResult,
+  Encoding,
+  EncodingOrOptions,
+  ProcessedOptions,
 } from 'types';
 
 const RNFSManager = NativeModules.RNFSManager;
@@ -36,34 +39,67 @@ const normalizeFilePath = (path: string) =>
 
 function readFileGeneric(
   filepath: string,
-  encodingOrOptions: string | null,
+  encodingOrOptions: EncodingOrOptions,
   command: Function
 ) {
-  let options = {
-    encoding: 'utf8',
-  };
-
-  if (encodingOrOptions) {
-    options.encoding = encodingOrOptions;
-  }
+  const options = parseOptions(encodingOrOptions);
 
   return command(normalizeFilePath(filepath)).then((b64: string) => {
-    let contents;
-
-    if (options.encoding === 'utf8') {
-      contents = decode_utf8(atob(b64));
-    } else if (options.encoding === 'ascii') {
-      contents = atob(b64);
-    } else if (options.encoding === 'base64') {
-      contents = b64;
-    } else {
-      throw new Error(
-        'Invalid encoding type "' + String(options.encoding) + '"'
-      );
-    }
-
-    return contents;
+    return encodeContents(b64, options.encoding);
   });
+}
+
+function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
+  let options = {
+    encoding: 'utf8' as Encoding,
+  };
+
+  if (!encodingOrOptions) {
+    return options;
+  }
+
+  if (typeof encodingOrOptions === 'string') {
+    options.encoding = encodingOrOptions as Encoding;
+  } else if (typeof encodingOrOptions === 'object') {
+    options = {
+      ...options,
+      ...encodingOrOptions,
+    };
+  }
+
+  return options;
+}
+
+function encodeContents(contents: string, encoding: Encoding) {
+  if (encoding === 'utf8') {
+    return btoa(encode_utf8(contents));
+  }
+
+  if (encoding === 'ascii') {
+    return btoa(contents);
+  }
+
+  if (encoding === 'base64') {
+    return contents;
+  }
+
+  throw new Error('Invalid encoding type "' + String(encoding) + '"');
+}
+
+function decodeContents(b64: string, encoding: Encoding) {
+  if (encoding === 'utf8') {
+    return atob(decode_utf8(b64));
+  }
+
+  if (encoding === 'ascii') {
+    return atob(b64);
+  }
+
+  if (encoding === 'base64') {
+    return b64;
+  }
+
+  throw new Error('Invalid encoding type "' + String(encoding) + '"');
 }
 
 function readDirGeneric(dirPath: string, command: Function) {
@@ -178,19 +214,6 @@ const RNFS = {
     });
   },
 
-  // setReadable for Android
-  setReadable(
-    filepath: string,
-    readable: boolean,
-    ownerOnly: boolean
-  ): Promise<boolean> {
-    return RNFSManager.setReadable(filepath, readable, ownerOnly).then(
-      (result: any) => {
-        return result;
-      }
-    );
-  },
-
   stat(filepath: string): Promise<StatResult> {
     return RNFSManager.stat(normalizeFilePath(filepath)).then(
       (result: StatResult) => {
@@ -216,37 +239,13 @@ const RNFS = {
     filepath: string,
     length: number = 0,
     position: number = 0,
-    encodingOrOptions?: any
+    encodingOrOptions?: EncodingOrOptions
   ): Promise<string> {
-    let options = {
-      encoding: 'utf8',
-    };
-
-    if (encodingOrOptions) {
-      if (typeof encodingOrOptions === 'string') {
-        options.encoding = encodingOrOptions;
-      } else if (typeof encodingOrOptions === 'object') {
-        options = encodingOrOptions;
-      }
-    }
+    const options = parseOptions(encodingOrOptions);
 
     return RNFSManager.read(normalizeFilePath(filepath), length, position).then(
       (b64: string) => {
-        let contents;
-
-        if (options.encoding === 'utf8') {
-          contents = decode_utf8(atob(b64));
-        } else if (options.encoding === 'ascii') {
-          contents = atob(b64);
-        } else if (options.encoding === 'base64') {
-          contents = b64;
-        } else {
-          throw new Error(
-            'Invalid encoding type "' + String(options.encoding) + '"'
-          );
-        }
-
-        return contents;
+        return decodeContents(b64, options.encoding);
       }
     );
   },
@@ -258,70 +257,21 @@ const RNFS = {
   writeFile(
     filepath: string,
     contents: string,
-    encodingOrOptions?: any
-  ): Promise<void> {
-    let b64;
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<null> {
+    const options = parseOptions(encodingOrOptions);
+    const b64 = encodeContents(contents, options.encoding);
 
-    let options = {
-      encoding: 'utf8',
-    };
-
-    if (encodingOrOptions) {
-      if (typeof encodingOrOptions === 'string') {
-        options.encoding = encodingOrOptions;
-      } else if (typeof encodingOrOptions === 'object') {
-        options = {
-          ...options,
-          ...encodingOrOptions,
-        };
-      }
-    }
-
-    if (options.encoding === 'utf8') {
-      b64 = btoa(atob(contents));
-    } else if (options.encoding === 'ascii') {
-      b64 = btoa(contents);
-    } else if (options.encoding === 'base64') {
-      b64 = contents;
-    } else {
-      throw new Error('Invalid encoding type "' + options.encoding + '"');
-    }
-
-    return RNFSManager.writeFile(
-      normalizeFilePath(filepath),
-      b64,
-      options
-    ).then(() => void 0);
+    return RNFSManager.writeFile(normalizeFilePath(filepath), b64, options);
   },
 
   appendFile(
     filepath: string,
     contents: string,
-    encodingOrOptions?: any
+    encodingOrOptions?: EncodingOrOptions
   ): Promise<void> {
-    let b64;
-
-    let options = {
-      encoding: 'utf8',
-    };
-
-    if (encodingOrOptions) {
-      if (typeof encodingOrOptions === 'string') {
-        options.encoding = encodingOrOptions;
-      } else if (typeof encodingOrOptions === 'object') {
-        options = encodingOrOptions;
-      }
-    }
-
-    if (options.encoding === 'utf8') {
-      b64 = btoa(encode_utf8(contents));
-    } else if (options.encoding === 'ascii') {
-      b64 = btoa(contents);
-    } else if (options.encoding === 'base64') {
-      b64 = contents;
-    } else {
-      throw new Error('Invalid encoding type "' + options.encoding + '"');
-    }
+    const options = parseOptions(encodingOrOptions);
+    const b64 = encodeContents(contents, options.encoding);
 
     return RNFSManager.appendFile(normalizeFilePath(filepath), b64);
   },
@@ -330,31 +280,10 @@ const RNFS = {
     filepath: string,
     contents: string,
     position?: number,
-    encodingOrOptions?: any
-  ): Promise<void> {
-    let b64;
-
-    let options = {
-      encoding: 'utf8',
-    };
-
-    if (encodingOrOptions) {
-      if (typeof encodingOrOptions === 'string') {
-        options.encoding = encodingOrOptions;
-      } else if (typeof encodingOrOptions === 'object') {
-        options = encodingOrOptions;
-      }
-    }
-
-    if (options.encoding === 'utf8') {
-      b64 = btoa(encode_utf8(contents));
-    } else if (options.encoding === 'ascii') {
-      b64 = atob(contents);
-    } else if (options.encoding === 'base64') {
-      b64 = contents;
-    } else {
-      throw new Error('Invalid encoding type "' + options.encoding + '"');
-    }
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<null> {
+    const options = parseOptions(encodingOrOptions);
+    const b64 = encodeContents(contents, options.encoding);
 
     if (position === undefined) {
       position = -1;

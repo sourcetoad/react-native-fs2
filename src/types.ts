@@ -99,14 +99,11 @@ export type UploadProgressCallbackResult = {
   totalBytesSent: number; // The number of bytes sent to the server
 };
 
-export type UploadResult = {
-  jobId: number; // The upload job ID, required if one wishes to cancel the upload. See `stopUpload`.
-  statusCode: number; // The HTTP status code
-  headers: Headers; // The HTTP response headers from the server
-  body: string; // The HTTP response body
-};
-
 export type FSInfoResult = {
   totalSpace: number; // The total amount of storage space on the device (in bytes).
   freeSpace: number; // The amount of available storage space on the device (in bytes).
 };
+
+export type Encoding = 'utf8' | 'base64' | 'ascii';
+export type EncodingOrOptions = Encoding | Record<string, any>;
+export type ProcessedOptions = Record<string, any | Encoding>;
