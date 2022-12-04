@@ -22,8 +22,6 @@ import type {
 const RNFSManager = NativeModules.RNFSManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
-const isIOS = Platform.OS === 'ios';
-
 const RNFSFileTypeRegular = RNFSManager.RNFSFileTypeRegular;
 const RNFSFileTypeDirectory = RNFSManager.RNFSFileTypeDirectory;
 
@@ -341,7 +339,7 @@ const RNFS = {
 
   touch(filepath: string, mtime?: Date, ctime?: Date): Promise<void> {
     let ctimeTime: undefined | number = 0;
-    if (isIOS) {
+    if (Platform.OS === 'ios') {
       ctimeTime = ctime && ctime.getTime();
     }
     return RNFSManager.touch(
