@@ -37,15 +37,12 @@
     "url": "git@github.com:sourcetoad/react-native-fs2.git"
   },
   "keywords": [
-    "react-component",
     "react-native",
     "ios",
     "android",
     "fs",
     "filesystem",
-    "download",
-    "upload",
-    "file-transfer"
+    "download"
   ],
   "contributors": [
     "Johannes Lumpe <johannes@lum.pe> (https://github.com/johanneslumpe)",
