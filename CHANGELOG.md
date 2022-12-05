@@ -1,5 +1,10 @@
 # Changelog
 
+# v3.0.2 (December 5, 2022)
+ * [#8](https://github.com/sourcetoad/react-native-fs2/issues/8) - Allow jest testing to work with native enums.
+ * Further purge of Upload functionality from iOS side.
+ * Inline type for downloadFile return
+
 # v3.0.1 (December 5, 2022)
  * Rename internals to `RNFS2` to prevent collisions with older package.
  * Enforce peering to RN69+
