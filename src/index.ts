@@ -82,20 +82,6 @@ function decodeContents(b64: string, encoding: Encoding) {
   throw new Error('Invalid encoding type "' + String(encoding) + '"');
 }
 
-function readDirGeneric(dirPath: string, command: Function) {
-  return command(normalizeFilePath(dirPath)).then((files: any[]) => {
-    return files.map((file) => ({
-      ctime: (file.ctime && new Date(file.ctime * 1000)) || null,
-      mtime: (file.mtime && new Date(file.mtime * 1000)) || null,
-      name: file.name,
-      path: file.path,
-      size: file.size,
-      isFile: () => file.type === RNFSFileTypeRegular,
-      isDirectory: () => file.type === RNFSFileTypeDirectory,
-    }));
-  });
-}
-
 export default {
   mkdir(filepath: string, options: MkdirOptions = {}): Promise<undefined> {
     return RNFSManager.mkdir(normalizeFilePath(filepath), options).then(() => void 0);
@@ -142,7 +128,17 @@ export default {
   },
 
   readDir(dirPath: string): Promise<ReadDirItem[]> {
-    return readDirGeneric(dirPath, RNFSManager.readDir);
+    return RNFSManager.readDir(normalizeFilePath(dirPath)).then((files: any[]) => {
+      return files.map((file) => ({
+        ctime: (file.ctime && new Date(file.ctime * 1000)) || null,
+        mtime: (file.mtime && new Date(file.mtime * 1000)) || null,
+        name: file.name,
+        path: file.path,
+        size: file.size,
+        isFile: () => file.type === RNFSFileTypeRegular,
+        isDirectory: () => file.type === RNFSFileTypeDirectory,
+      }));
+    });
   },
 
   // Node style version (lowercase d). Returns just the names
