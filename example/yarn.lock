@@ -5672,9 +5672,11 @@ react-native-codegen@^0.70.6:
     jscodeshift "^0.13.1"
     nullthrows "^1.1.1"
 
-"react-native-fs2@link:..":
-  version "0.0.0"
-  uid ""
+"react-native-fs2@file:..":
+  version "2.20.0"
+  dependencies:
+    base-64 "^1.0.0"
+    utf8 "^3.0.0"
 
 react-native-gradle-plugin@^0.70.3:
   version "0.70.3"
