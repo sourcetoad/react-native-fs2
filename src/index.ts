@@ -20,11 +20,11 @@ const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 const RNFSFileTypeRegular = RNFSManager.RNFSFileTypeRegular;
 const RNFSFileTypeDirectory = RNFSManager.RNFSFileTypeDirectory;
 
-let jobId = 0;
+let globalJobId = 0;
 
 const getJobId = () => {
-  jobId += 1;
-  return jobId;
+  globalJobId += 1;
+  return globalJobId;
 };
 
 const normalizeFilePath = (path: string) => (path.startsWith('file://') ? path.slice(7) : path);
