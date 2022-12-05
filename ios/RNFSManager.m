@@ -1,10 +1,5 @@
-//
-//  RNFSManager.m
-//  RNFSManager
-//
-//  Created by Johannes Lumpe on 08/05/15.
-//  Copyright (c) 2015 Johannes Lumpe. All rights reserved.
-//
+// Created by Johannes Lumpe on 08/05/15.
+// Copyright (c) 2015 Johannes Lumpe. All rights reserved.
 
 #import "RNFSManager.h"
 

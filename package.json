@@ -49,7 +49,8 @@
   ],
   "contributors": [
     "Johannes Lumpe <johannes@lum.pe> (https://github.com/johanneslumpe)",
-    "Hagen Hübel <hhuebel@itinance.com> (https://github.com/itinance)"
+    "Hagen Hübel <hhuebel@itinance.com> (https://github.com/itinance)",
+    "Connor Tumbleson <connor@sourcetoad.com> (https://github.com/iBotPeaches)"
   ],
   "license": "MIT",
   "dependencies": {

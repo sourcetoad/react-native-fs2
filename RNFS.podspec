@@ -7,7 +7,11 @@ Pod::Spec.new do |s|
   s.homepage        = "https://github.com/sourcetoad/react-native-fs2"
   s.summary         = pjson["description"]
   s.license         = pjson["license"]
-  s.author          = { "Johannes Lumpe" => "johannes@lum.pe" }
+  s.authors         = {
+    "Johannes Lumpe" => "johannes@lum.pe",
+    "Hagen Hübel" => "hhuebel@itinance.com",
+    "Connor Tumbleson" => "connor@sourcetoad.com"
+  }
 
   s.ios.deployment_target = '8.0'
 
