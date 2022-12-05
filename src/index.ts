@@ -1,9 +1,4 @@
-import {
-  EmitterSubscription,
-  NativeEventEmitter,
-  NativeModules,
-  Platform,
-} from 'react-native';
+import { EmitterSubscription, NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import { decode as atob, encode as btoa } from 'base-64';
 import { decode as decode_utf8, encode as encode_utf8 } from 'utf8';
 import type {
@@ -32,8 +27,7 @@ const getJobId = () => {
   return jobId;
 };
 
-const normalizeFilePath = (path: string) =>
-  path.startsWith('file://') ? path.slice(7) : path;
+const normalizeFilePath = (path: string) => (path.startsWith('file://') ? path.slice(7) : path);
 
 function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
   let options = {
@@ -102,35 +96,17 @@ function readDirGeneric(dirPath: string, command: Function) {
   });
 }
 
-const RNFS = {
+export default {
   mkdir(filepath: string, options: MkdirOptions = {}): Promise<undefined> {
-    return RNFSManager.mkdir(normalizeFilePath(filepath), options).then(
-      () => void 0
-    );
+    return RNFSManager.mkdir(normalizeFilePath(filepath), options).then(() => void 0);
   },
 
-  moveFile(
-    filepath: string,
-    destPath: string,
-    options: FileOptions = {}
-  ): Promise<void> {
-    return RNFSManager.moveFile(
-      normalizeFilePath(filepath),
-      normalizeFilePath(destPath),
-      options
-    ).then(() => void 0);
+  moveFile(filepath: string, destPath: string, options: FileOptions = {}): Promise<undefined> {
+    return RNFSManager.moveFile(normalizeFilePath(filepath), normalizeFilePath(destPath), options).then(() => void 0);
   },
 
-  copyFile(
-    filepath: string,
-    destPath: string,
-    options: FileOptions = {}
-  ): Promise<void> {
-    return RNFSManager.copyFile(
-      normalizeFilePath(filepath),
-      normalizeFilePath(destPath),
-      options
-    ).then(() => void 0);
+  copyFile(filepath: string, destPath: string, options: FileOptions = {}): Promise<undefined> {
+    return RNFSManager.copyFile(normalizeFilePath(filepath), normalizeFilePath(destPath), options).then(() => void 0);
   },
 
   getFSInfo(): Promise<FSInfoResult> {
@@ -171,39 +147,32 @@ const RNFS = {
 
   // Node style version (lowercase d). Returns just the names
   readdir(dirpath: string): Promise<string[]> {
-    return RNFS.readDir(normalizeFilePath(dirpath)).then((files) => {
+    return this.readDir(normalizeFilePath(dirpath)).then((files) => {
       return files.map((file) => file.name);
     });
   },
 
   stat(filepath: string): Promise<StatResult> {
-    return RNFSManager.stat(normalizeFilePath(filepath)).then(
-      (result: StatResult) => {
-        return {
-          path: filepath,
-          ctime: new Date(result.ctime * 1000),
-          mtime: new Date(result.mtime * 1000),
-          size: result.size,
-          mode: result.mode,
-          originalFilepath: result.originalFilepath,
-          isFile: () => result.type === RNFSFileTypeRegular,
-          isDirectory: () => result.type === RNFSFileTypeDirectory,
-        };
-      }
-    );
+    return RNFSManager.stat(normalizeFilePath(filepath)).then((result: StatResult) => {
+      return {
+        path: filepath,
+        ctime: new Date(result.ctime * 1000),
+        mtime: new Date(result.mtime * 1000),
+        size: result.size,
+        mode: result.mode,
+        originalFilepath: result.originalFilepath,
+        isFile: () => result.type === RNFSFileTypeRegular,
+        isDirectory: () => result.type === RNFSFileTypeDirectory,
+      };
+    });
   },
 
-  readFile(
-    filepath: string,
-    encodingOrOptions?: EncodingOrOptions
-  ): Promise<string> {
+  readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string> {
     const options = parseOptions(encodingOrOptions);
 
-    return RNFSManager.readFile(normalizeFilePath(filepath)).then(
-      (b64: string) => {
-        return encodeContents(b64, options.encoding);
-      }
-    );
+    return RNFSManager.readFile(normalizeFilePath(filepath)).then((b64: string) => {
+      return encodeContents(b64, options.encoding);
+    });
   },
 
   read(
@@ -214,45 +183,30 @@ const RNFS = {
   ): Promise<string> {
     const options = parseOptions(encodingOrOptions);
 
-    return RNFSManager.read(normalizeFilePath(filepath), length, position).then(
-      (b64: string) => {
-        return decodeContents(b64, options.encoding);
-      }
-    );
+    return RNFSManager.read(normalizeFilePath(filepath), length, position).then((b64: string) => {
+      return decodeContents(b64, options.encoding);
+    });
   },
 
   hash(filepath: string, algorithm: string): Promise<string> {
     return RNFSManager.hash(normalizeFilePath(filepath), algorithm);
   },
 
-  writeFile(
-    filepath: string,
-    contents: string,
-    encodingOrOptions?: EncodingOrOptions
-  ): Promise<null> {
+  writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<null> {
     const options = parseOptions(encodingOrOptions);
     const b64 = encodeContents(contents, options.encoding);
 
     return RNFSManager.writeFile(normalizeFilePath(filepath), b64, options);
   },
 
-  appendFile(
-    filepath: string,
-    contents: string,
-    encodingOrOptions?: EncodingOrOptions
-  ): Promise<void> {
+  appendFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void> {
     const options = parseOptions(encodingOrOptions);
     const b64 = encodeContents(contents, options.encoding);
 
     return RNFSManager.appendFile(normalizeFilePath(filepath), b64);
   },
 
-  write(
-    filepath: string,
-    contents: string,
-    position?: number,
-    encodingOrOptions?: EncodingOrOptions
-  ): Promise<null> {
+  write(filepath: string, contents: string, position?: number, encodingOrOptions?: EncodingOrOptions): Promise<null> {
     const options = parseOptions(encodingOrOptions);
     const b64 = encodeContents(contents, options.encoding);
 
@@ -260,9 +214,7 @@ const RNFS = {
       position = -1;
     }
 
-    return RNFSManager.write(normalizeFilePath(filepath), b64, position).then(
-      () => void 0
-    );
+    return RNFSManager.write(normalizeFilePath(filepath), b64, position).then(() => void 0);
   },
 
   downloadFile(options: DownloadFileOptions): {
@@ -339,11 +291,7 @@ const RNFS = {
     if (Platform.OS === 'ios') {
       ctimeTime = ctime && ctime.getTime();
     }
-    return RNFSManager.touch(
-      normalizeFilePath(filepath),
-      mtime && mtime.getTime(),
-      ctimeTime
-    );
+    return RNFSManager.touch(normalizeFilePath(filepath), mtime && mtime.getTime(), ctimeTime);
   },
 
   scanFile(path: string): Promise<ReadDirItem[]> {
@@ -352,17 +300,13 @@ const RNFS = {
 
   MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
   CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,
-  ExternalCachesDirectoryPath:
-    RNFSManager.RNFSExternalCachesDirectoryPath as String,
+  ExternalCachesDirectoryPath: RNFSManager.RNFSExternalCachesDirectoryPath as String,
   DocumentDirectoryPath: RNFSManager.RNFSDocumentDirectoryPath as String,
   DownloadDirectoryPath: RNFSManager.RNFSDownloadDirectoryPath as String,
   ExternalDirectoryPath: RNFSManager.RNFSExternalDirectoryPath as String,
-  ExternalStorageDirectoryPath:
-    RNFSManager.RNFSExternalStorageDirectoryPath as String,
+  ExternalStorageDirectoryPath: RNFSManager.RNFSExternalStorageDirectoryPath as String,
   TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
   LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
   PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
   FileProtectionKeys: RNFSManager.RNFSFileProtectionKeys as String,
 };
-
-export default RNFS;
