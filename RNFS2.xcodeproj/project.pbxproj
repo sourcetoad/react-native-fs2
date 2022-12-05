@@ -69,7 +69,7 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		F12AFB9A1ADAF8F800E0535D /* RNFS */ = {
+		F12AFB9A1ADAF8F800E0535D /* RNFS2 */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F12AFBAF1ADAF8F800E0535D /* Build configuration list for PBXNativeTarget "RNFS" */;
 			buildPhases = (
@@ -81,7 +81,7 @@
 			);
 			dependencies = (
 			);
-			name = RNFS;
+			name = RNFS2;
 			productName = RNLocalNotification;
 			productReference = F12AFB9B1ADAF8F800E0535D /* libRNFS.a */;
 			productType = "com.apple.product-type.library.static";
@@ -113,7 +113,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				F12AFB9A1ADAF8F800E0535D /* RNFS */,
+				F12AFB9A1ADAF8F800E0535D /* RNFS2 */,
 			);
 		};
 /* End PBXProject section */
@@ -245,7 +245,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		F12AFB961ADAF8F800E0535D /* Build configuration list for PBXProject "RNFS" */ = {
+		F12AFB961ADAF8F800E0535D /* Build configuration list for PBXProject "RNFS2" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F12AFBAD1ADAF8F800E0535D /* Debug */,
@@ -254,7 +254,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		F12AFBAF1ADAF8F800E0535D /* Build configuration list for PBXNativeTarget "RNFS" */ = {
+		F12AFBAF1ADAF8F800E0535D /* Build configuration list for PBXNativeTarget "RNFS2" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F12AFBB01ADAF8F800E0535D /* Debug */,

@@ -1,4 +1,4 @@
-package com.rnfs;
+package com.rnfs2;
 
 import java.io.File;
 import java.net.URL;

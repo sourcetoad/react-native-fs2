@@ -2,7 +2,7 @@ require 'json'
 pjson = JSON.parse(File.read('package.json'))
 
 Pod::Spec.new do |s|
-  s.name            = "RNFS"
+  s.name            = "RNFS2"
   s.version         = pjson["version"]
   s.homepage        = "https://github.com/sourcetoad/react-native-fs2"
   s.summary         = pjson["description"]
