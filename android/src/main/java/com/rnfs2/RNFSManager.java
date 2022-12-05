@@ -1,4 +1,4 @@
-package com.rnfs;
+package com.rnfs2;
 
 import android.database.Cursor;
 import android.net.Uri;
