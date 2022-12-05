@@ -17,8 +17,10 @@ import type {
 const RNFSManager = NativeModules.RNFSManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
-const RNFSFileTypeRegular = RNFSManager.RNFSFileTypeRegular;
-const RNFSFileTypeDirectory = RNFSManager.RNFSFileTypeDirectory;
+// Since we are mapping enums from their native counterpart. We must allow these to fail if run
+// in say jest or without the native component.
+const RNFSFileTypeRegular = RNFSManager?.RNFSFileTypeRegular;
+const RNFSFileTypeDirectory = RNFSManager?.RNFSFileTypeDirectory;
 
 let globalJobId = 0;
 
