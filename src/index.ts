@@ -297,5 +297,4 @@ export default {
   TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
   LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
   PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
-  FileProtectionKeys: RNFSManager.RNFSFileProtectionKeys as String,
 };
