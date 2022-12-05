@@ -141,13 +141,6 @@ export default {
     });
   },
 
-  // Node style version (lowercase d). Returns just the names
-  readdir(dirpath: string): Promise<string[]> {
-    return this.readDir(normalizeFilePath(dirpath)).then((files) => {
-      return files.map((file) => file.name);
-    });
-  },
-
   stat(filepath: string): Promise<StatResult> {
     return RNFSManager.stat(normalizeFilePath(filepath)).then((result: StatResult) => {
       return {
