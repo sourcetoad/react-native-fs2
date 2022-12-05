@@ -458,7 +458,7 @@ RCT_EXPORT_METHOD(copyFile:(NSString *)filepath
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[@"UploadBegin",@"UploadProgress",@"DownloadBegin",@"DownloadProgress",@"DownloadResumable"];
+    return @[@"DownloadBegin",@"DownloadProgress",@"DownloadResumable"];
 }
 
 RCT_EXPORT_METHOD(downloadFile:(NSDictionary *)options
@@ -601,15 +601,6 @@ RCT_EXPORT_METHOD(completeHandlerIOS:(nonnull NSNumber *)jobId
         }
     }
     resolve(nil);
-}
-
-RCT_EXPORT_METHOD(stopUpload:(nonnull NSNumber *)jobId)
-{
-  RNFSUploader* uploader = [self.uploaders objectForKey:[jobId stringValue]];
-
-  if (uploader != nil) {
-    [uploader stopUpload];
-  }
 }
 
 RCT_EXPORT_METHOD(getFSInfo:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
