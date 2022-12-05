@@ -1,6 +1,11 @@
 # Changelog
 
-# v3.0.0
+# v3.0.1 (December 5, 2022)
+ * Rename internals to `RNFS2` to prevent collisions with older package.
+ * Enforce peering to RN69+
+ * Drop Node 16 from CI.
+
+# v3.0.0 (December 5, 2022)
 
  * Removed Windows support.
  * Convert to TypeScript.
