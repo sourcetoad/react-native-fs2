@@ -2,10 +2,11 @@
   "name": "react-native-fs2",
   "version": "2.20.0",
   "description": "Native filesystem access for react-native",
-  "react-native": "src/index",
-  "types": "lib/typescript/src/types.ts",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
+  "types": "lib/typescript/index.d.ts",
+  "react-native": "src/index",
+  "source": "src/index",
   "files": [
     "src",
     "lib",
@@ -27,7 +28,9 @@
   ],
   "scripts": {
     "lint": "eslint \"src/*.{js,ts,tsx}\"",
-    "prepare": "bob build"
+    "prepare": "bob build",
+    "example:android": "cd example; yarn run android",
+    "example:ios": "cd example; yarn run ios"
   },
   "repository": {
     "type": "git",
