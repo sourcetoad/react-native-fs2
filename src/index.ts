@@ -8,7 +8,7 @@ import type {
   ReadDirItem,
   StatResult,
   DownloadFileOptions,
-  DownloadResult,
+  DownloadFileResult,
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
@@ -52,7 +52,7 @@ function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
   return options;
 }
 
-function encodeContents(contents: string, encoding: Encoding) {
+function encodeContents(contents: string, encoding: Encoding): string {
   if (encoding === 'utf8') {
     return btoa(encode_utf8(contents));
   }
@@ -68,7 +68,7 @@ function encodeContents(contents: string, encoding: Encoding) {
   throw new Error('Invalid encoding type "' + String(encoding) + '"');
 }
 
-function decodeContents(b64: string, encoding: Encoding) {
+function decodeContents(b64: string, encoding: Encoding): string {
   if (encoding === 'utf8') {
     return atob(decode_utf8(b64));
   }
@@ -208,10 +208,7 @@ export default {
     return RNFSManager.write(normalizeFilePath(filepath), b64, position).then(() => void 0);
   },
 
-  downloadFile(options: DownloadFileOptions): {
-    jobId: number;
-    promise: Promise<DownloadResult>;
-  } {
+  downloadFile(options: DownloadFileOptions): DownloadFileResult {
     const jobId = getJobId();
     let subscriptions: EmitterSubscription[] = [];
 

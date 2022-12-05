@@ -51,22 +51,27 @@ export type DownloadFileOptions = {
 };
 
 export type DownloadBeginCallbackResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   statusCode: number; // The HTTP status code
   contentLength: number; // The total size in bytes of the download resource
   headers: Headers; // The HTTP response headers from the server
 };
 
 export type DownloadProgressCallbackResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   contentLength: number; // The total size in bytes of the download resource
   bytesWritten: number; // The number of bytes written to the file so far
 };
 
 export type DownloadResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   statusCode: number; // The HTTP status code
   bytesWritten: number; // The number of bytes written to the file
+};
+
+export type DownloadFileResult = {
+  jobId: number;
+  promise: Promise<DownloadResult>;
 };
 
 export type FSInfoResult = {
