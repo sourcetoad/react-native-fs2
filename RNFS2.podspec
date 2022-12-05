@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
     "Connor Tumbleson" => "connor@sourcetoad.com"
   }
 
-  s.ios.deployment_target = '8.0'
+  s.ios.deployment_target = '12.4'
 
   s.source          = { :git => "https://github.com/sourcetoad/react-native-fs2", :tag => "v#{s.version}" }
   s.source_files    = "ios/*.{h,m}"

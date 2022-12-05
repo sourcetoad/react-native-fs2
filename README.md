@@ -23,6 +23,11 @@ We will continue to support this library for as long as we use it.
 yarn add react-native-fs2
 ```
 
+#### Supported React Native Versions
+| react-native-fs2 | react-native |
+|------------------|--------------|
+| 3.0.x            | >=0.69       |
+
 ### Changelog
 Changes can be found in [CHANGELOG.md](CHANGELOG.md)
 
