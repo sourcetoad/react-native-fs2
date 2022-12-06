@@ -5,6 +5,7 @@ import {SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
  * Examples
  */
 import Example1 from './example1';
+import Example2 from './example2';
 
 const App = () => {
   return (
@@ -15,6 +16,7 @@ const App = () => {
           <Text style={styles.subTitle}>Run the examples below directly to your device or simulators</Text>
 
           <Example1 />
+          <Example2 />
         </View>
       </ScrollView>
     </SafeAreaView>
