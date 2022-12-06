@@ -51,52 +51,27 @@ export type DownloadFileOptions = {
 };
 
 export type DownloadBeginCallbackResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   statusCode: number; // The HTTP status code
   contentLength: number; // The total size in bytes of the download resource
   headers: Headers; // The HTTP response headers from the server
 };
 
 export type DownloadProgressCallbackResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   contentLength: number; // The total size in bytes of the download resource
   bytesWritten: number; // The number of bytes written to the file so far
 };
 
 export type DownloadResult = {
-  jobId: number; // The download job ID, required if one wishes to cancel the download. See `stopDownload`.
+  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
   statusCode: number; // The HTTP status code
   bytesWritten: number; // The number of bytes written to the file
 };
 
-export type UploadFileOptions = {
-  toUrl: string; // URL to upload file to
-  binaryStreamOnly?: boolean; // Allow for binary data stream for file to be uploaded without extra headers, Default is 'false'
-  files: UploadFileItem[]; // An array of objects with the file information to be uploaded.
-  headers?: Headers; // An object of headers to be passed to the server
-  fields?: Fields; // An object of fields to be passed to the server
-  method?: string; // Default is 'POST', supports 'POST' and 'PUT'
-  beginCallback?: (res: UploadBeginCallbackResult) => void; // deprecated
-  progressCallback?: (res: UploadProgressCallbackResult) => void; // deprecated
-  begin?: (res: UploadBeginCallbackResult) => void;
-  progress?: (res: UploadProgressCallbackResult) => void;
-};
-
-export type UploadFileItem = {
-  name: string; // Name of the file, if not defined then filename is used
-  filename: string; // Name of file
-  filepath: string; // Path to file
-  filetype: string; // The mimetype of the file to be uploaded, if not defined it will get mimetype from `filepath` extension
-};
-
-export type UploadBeginCallbackResult = {
-  jobId: number; // The upload job ID, required if one wishes to cancel the upload. See `stopUpload`.
-};
-
-export type UploadProgressCallbackResult = {
-  jobId: number; // The upload job ID, required if one wishes to cancel the upload. See `stopUpload`.
-  totalBytesExpectedToSend: number; // The total number of bytes that will be sent to the server
-  totalBytesSent: number; // The number of bytes sent to the server
+export type DownloadFileResult = {
+  jobId: number;
+  promise: Promise<DownloadResult>;
 };
 
 export type FSInfoResult = {

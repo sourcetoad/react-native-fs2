@@ -1,7 +1,41 @@
 # Changelog
 
-# v3.0.0
+# v3.0.2 (December 5, 2022)
+ * [#8](https://github.com/sourcetoad/react-native-fs2/issues/8) - Allow jest testing to work with native enums.
+ * Further purge of Upload functionality from iOS side.
+ * Inline type for downloadFile return
 
- * todo
+# v3.0.1 (December 5, 2022)
+ * Rename internals to `RNFS2` to prevent collisions with older package.
+ * Enforce peering to RN69+
+ * Drop Node 16 from CI.
 
-_Changes prior to v2.20.0 can be found in [original fork](https://github.com/itinance/react-native-fs)_
+# v3.0.0 (December 5, 2022)
+
+ * Removed Windows support.
+ * Convert to TypeScript.
+ * Migrated to [Bob](https://github.com/callstack/react-native-builder-bob)
+ * Migrated iOS files into `ios` folder.
+ * Migrated source files into `src folder`.
+ * Migrated `IntegrationTests` into `/example` folder.
+ * Removed the following functions:
+   * `pathForBundle`
+   * `pathForGroup`
+   * `readDirAssets`
+   * `existsAssets`
+   * `existsRes`
+   * `readdir`
+   * `setReadable`
+   * `readFileAssets`
+   * `readFileRes`
+   * `copyFileAssets`
+   * `copyFileRes`
+   * `copyAssetsFileIOS`
+   * `copyAssetsVideoIOS`
+   * `uploadFiles`
+   * `stopUpload`
+ * (Android) Revert Async nature of copy/move. Ported from [itinance/react-native-fs/pull/1150](https://github.com/itinance/react-native-fs/pull/1150)
+ * Clean up type handling of options/encoding. Ported from [itinance/react-native-fs/pull/1011](https://github.com/itinance/react-native-fs/pull/1011)
+
+---
+_Changes prior to v3.0.0 can be found in [original fork](https://github.com/itinance/react-native-fs)_

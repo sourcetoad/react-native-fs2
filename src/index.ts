@@ -8,7 +8,7 @@ import type {
   ReadDirItem,
   StatResult,
   DownloadFileOptions,
-  DownloadResult,
+  DownloadFileResult,
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
@@ -17,14 +17,16 @@ import type {
 const RNFSManager = NativeModules.RNFSManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
-const RNFSFileTypeRegular = RNFSManager.RNFSFileTypeRegular;
-const RNFSFileTypeDirectory = RNFSManager.RNFSFileTypeDirectory;
+// Since we are mapping enums from their native counterpart. We must allow these to fail if run
+// in say jest or without the native component.
+const RNFSFileTypeRegular = RNFSManager?.RNFSFileTypeRegular;
+const RNFSFileTypeDirectory = RNFSManager?.RNFSFileTypeDirectory;
 
-let jobId = 0;
+let globalJobId = 0;
 
 const getJobId = () => {
-  jobId += 1;
-  return jobId;
+  globalJobId += 1;
+  return globalJobId;
 };
 
 const normalizeFilePath = (path: string) => (path.startsWith('file://') ? path.slice(7) : path);
@@ -50,7 +52,7 @@ function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
   return options;
 }
 
-function encodeContents(contents: string, encoding: Encoding) {
+function encodeContents(contents: string, encoding: Encoding): string {
   if (encoding === 'utf8') {
     return btoa(encode_utf8(contents));
   }
@@ -66,7 +68,7 @@ function encodeContents(contents: string, encoding: Encoding) {
   throw new Error('Invalid encoding type "' + String(encoding) + '"');
 }
 
-function decodeContents(b64: string, encoding: Encoding) {
+function decodeContents(b64: string, encoding: Encoding): string {
   if (encoding === 'utf8') {
     return atob(decode_utf8(b64));
   }
@@ -141,13 +143,6 @@ export default {
     });
   },
 
-  // Node style version (lowercase d). Returns just the names
-  readdir(dirpath: string): Promise<string[]> {
-    return this.readDir(normalizeFilePath(dirpath)).then((files) => {
-      return files.map((file) => file.name);
-    });
-  },
-
   stat(filepath: string): Promise<StatResult> {
     return RNFSManager.stat(normalizeFilePath(filepath)).then((result: StatResult) => {
       return {
@@ -213,10 +208,7 @@ export default {
     return RNFSManager.write(normalizeFilePath(filepath), b64, position).then(() => void 0);
   },
 
-  downloadFile(options: DownloadFileOptions): {
-    jobId: number;
-    promise: Promise<DownloadResult>;
-  } {
+  downloadFile(options: DownloadFileOptions): DownloadFileResult {
     const jobId = getJobId();
     let subscriptions: EmitterSubscription[] = [];
 
@@ -304,5 +296,4 @@ export default {
   TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
   LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
   PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
-  FileProtectionKeys: RNFSManager.RNFSFileProtectionKeys as String,
 };
