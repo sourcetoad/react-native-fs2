@@ -52,7 +52,7 @@ const Example = () => {
       setResult(runStatus);
 
       // write the file
-      const writePath = `${folder}/example1.txt`;
+      const writePath = `${folder}/RNFS2Example1Folder/example1.txt`;
       runStatus = `${runStatus}\n- Creating new text file "example1.txt"`;
       setResult(runStatus);
       await RNFS.writeFile(writePath, 'This is an example text file 12345.', 'utf8');
@@ -61,7 +61,7 @@ const Example = () => {
       setResult(runStatus);
 
       // read file and output content
-      const readPath = `${folder}/example1.txt`;
+      const readPath = `${folder}/RNFS2Example1Folder/example1.txt`;
 
       runStatus = `${runStatus}\n- Reading text file "example1.txt"`;
       setResult(runStatus);
