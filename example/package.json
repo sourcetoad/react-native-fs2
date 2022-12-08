@@ -12,7 +12,7 @@
   "dependencies": {
     "react": "18.1.0",
     "react-native": "0.70.6",
-    "react-native-fs2":  "file:../"
+    "react-native-fs2": "file:../"
   },
   "devDependencies": {
     "@babel/core": "^7.12.9",
