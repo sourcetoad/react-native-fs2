@@ -1,5 +1,17 @@
 import React from 'react';
-import {SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
+import RNFS from 'react-native-fs2';
+import {
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  Platform,
+  PermissionsAndroid,
+} from 'react-native';
+import {getTestFolder, requestAndroidPermission} from './utils';
 
 /**
  * Examples
@@ -8,12 +20,47 @@ import Example1 from './example1';
 import Example2 from './example2';
 
 const App = () => {
+  // methods
+  const cleanExampleFilesAndFolders = async () => {
+    try {
+      if (Platform.OS === 'android') {
+        const granted = await requestAndroidPermission();
+
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Android Permission Denied');
+        }
+      }
+      const folder = getTestFolder();
+
+      // Clean Example1 folder
+      await RNFS.unlink(`${folder}/RNFS2Example1Folder`);
+
+      // Clean Example2 folders
+      await RNFS.unlink(`${folder}/RNFS2Example2Folder1`);
+      await RNFS.unlink(`${folder}/RNFS2Example2Folder2`);
+    } catch {
+      console.log('Error Cleaning folders');
+    } finally {
+      Alert.alert('Successfully cleaned examples');
+    }
+  };
+
   return (
     <SafeAreaView>
       <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{minHeight: '100%'}}>
         <View style={styles.wrapper}>
-          <Text style={styles.title}>Examples</Text>
-          <Text style={styles.subTitle}>Run the examples below directly to your device or simulators</Text>
+          <View style={styles.topBar}>
+            <View>
+              <Text style={styles.title}>Examples</Text>
+              <Text style={styles.subTitle}>Run the examples below directly to your device or simulators</Text>
+            </View>
+
+            <Pressable
+              style={({pressed}) => (!pressed ? styles.clearButton : styles.clearButtonPressed)}
+              onPress={cleanExampleFilesAndFolders}>
+              <Text style={styles.clearButtonText}>Clean Example Folders/Files</Text>
+            </Pressable>
+          </View>
 
           <Example1 />
           <Example2 />
@@ -35,6 +82,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     padding: 10,
   },
+  topBar: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   sectionContainer: {
     marginTop: 32,
     paddingHorizontal: 24,
@@ -51,14 +104,19 @@ const styles = StyleSheet.create({
   highlight: {
     fontWeight: '700',
   },
-  button: {
-    flex: 0,
+  clearButton: {
+    backgroundColor: '#2644bc',
     paddingVertical: 10,
     paddingHorizontal: 15,
-    borderColor: '#3c3636',
-    backgroundColor: '#2644bc',
+    borderRadius: 5,
   },
-  buttonText: {
+  clearButtonPressed: {
+    backgroundColor: '#445ec6',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 5,
+  },
+  clearButtonText: {
     color: '#fff',
   },
 });
