@@ -1,7 +1,7 @@
 import React, {useState} from 'react';
 import RNFS from 'react-native-fs2';
 import {StyleSheet, Text, View, Button, Platform, ActivityIndicator, PermissionsAndroid} from 'react-native';
-import {getTestFolder, getFolderText} from './utils';
+import {getTestFolder, getFolderText, requestAndroidPermission} from './utils';
 
 const Example = () => {
   const [runningAction, setRunningAction] = useState(false);
@@ -17,13 +17,7 @@ const Example = () => {
 
       setRunningAction(true);
       if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE, {
-          title: 'Example Read/Write Storage Permission',
-          message: 'Examoke App needs read/write access to your phone storage to save files',
-          buttonNeutral: 'Ask Me Later',
-          buttonNegative: 'Cancel',
-          buttonPositive: 'OK',
-        });
+        const granted = await requestAndroidPermission();
 
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
           setResult('Permission denied');
