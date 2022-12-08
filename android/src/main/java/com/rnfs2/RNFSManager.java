@@ -320,16 +320,15 @@ public class RNFSManager extends ReactContextBaseJavaModule {
   }
 
   private void copyFile(String filepath, String destPath) throws IOException, IORejectionException {
-    InputStream in = getInputStream(filepath);
-    OutputStream out = getOutputStream(destPath, false);
-
-    byte[] buffer = new byte[1024];
-    int length;
-    while ((length = in.read(buffer)) > 0) {
-      out.write(buffer, 0, length);
+    try (InputStream in = getInputStream(filepath)) {
+      try (OutputStream out = getOutputStream(destPath, false)) {
+        byte[] buffer = new byte[1024];
+        int length;
+        while ((length = in.read(buffer)) > 0) {
+          out.write(buffer, 0, length);
+        }
+      }
     }
-    in.close();
-    out.close();
   }
 
   @ReactMethod
@@ -359,45 +358,6 @@ public class RNFSManager extends ReactContextBaseJavaModule {
     } catch (Exception ex) {
       ex.printStackTrace();
       reject(promise, directory, ex);
-    }
-  }
-
-  /**
-   * Internal method for copying that works with any InputStream
-   *
-   * @param in          InputStream from assets or file
-   * @param source      source path (only used for logging errors)
-   * @param destination destination path
-   * @param promise     React Callback
-   */
-  private void copyInputStream(InputStream in, String source, String destination, Promise promise) {
-    OutputStream out = null;
-    try {
-      out = getOutputStream(destination, false);
-
-      byte[] buffer = new byte[1024 * 10]; // 10k buffer
-      int read;
-      while ((read = in.read(buffer)) != -1) {
-        out.write(buffer, 0, read);
-      }
-
-      // Success!
-      promise.resolve(null);
-    } catch (Exception ex) {
-      reject(promise, source, new Exception(String.format("Failed to copy '%s' to %s (%s)", source, destination, ex.getLocalizedMessage())));
-    } finally {
-      if (in != null) {
-        try {
-          in.close();
-        } catch (IOException ignored) {
-        }
-      }
-      if (out != null) {
-        try {
-          out.close();
-        } catch (IOException ignored) {
-        }
-      }
     }
   }
 
