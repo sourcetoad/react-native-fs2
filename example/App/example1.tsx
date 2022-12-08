@@ -2,7 +2,7 @@ import React, {useState} from 'react';
 import RNFS from 'react-native-fs2';
 import {StyleSheet, Text, View, Button, Platform, ActivityIndicator, PermissionsAndroid} from 'react-native';
 import {decode as atob} from 'base-64';
-import {getTestFolder} from './utils';
+import {getTestFolder, getFolderText} from './utils';
 
 const Example = () => {
   const [runningAction, setRunningAction] = useState(false);
@@ -11,14 +11,6 @@ const Example = () => {
   /**
    * Methods
    */
-  const getFolderText = () => {
-    if (Platform.OS === 'ios') {
-      return 'DocumentDirectory';
-    }
-
-    return 'DownloadDirectory';
-  };
-
   const executeExample = async () => {
     try {
       // cleanup previous result

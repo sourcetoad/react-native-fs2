@@ -1,8 +1,7 @@
 import React, {useState} from 'react';
 import RNFS from 'react-native-fs2';
 import {StyleSheet, Text, View, Button, Platform, ActivityIndicator, PermissionsAndroid} from 'react-native';
-import {decode as atob} from 'base-64';
-import {getTestFolder} from './utils';
+import {getTestFolder, getFolderText} from './utils';
 
 const Example = () => {
   const [runningAction, setRunningAction] = useState(false);
@@ -11,14 +10,6 @@ const Example = () => {
   /**
    * Methods
    */
-  const getFolderText = () => {
-    if (Platform.OS === 'ios') {
-      return 'DocumentDirectory';
-    }
-
-    return 'DownloadDirectory';
-  };
-
   const executeExample = async () => {
     try {
       // cleanup previous result
@@ -90,7 +81,7 @@ const Example = () => {
 
       const folder2TextStat = await RNFS.stat(folder2Path);
 
-      runStatus = `${runStatus}\n- "folder1.txt" stat: ${JSON.stringify(folder2TextStat)}`;
+      runStatus = `${runStatus}\n- "folder2.txt" stat: ${JSON.stringify(folder2TextStat)}`;
       setResult(runStatus);
 
       // move folder1.txt to RNFS2Example2Folder2
@@ -174,7 +165,7 @@ const Example = () => {
       </Text>
 
       <Text style={styles.action}>
-        - checks if <Text style={styles.textBold}>RNFS2Example2Folder2</Text> folder
+        - checks if <Text style={styles.textBold}>RNFS2Example2Folder2</Text> folder is empty
       </Text>
 
       <View style={styles.statusWrapper}>
