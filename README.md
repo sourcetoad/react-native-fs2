@@ -39,10 +39,35 @@ console.log(await RNFS.getFSInfo());
 ```
 
 #### mkdir
+```ts
+await RNFS.mkdir(`FolderToCreate`);
+// mkdir(filepath: string, options?: MkdirOptions): Promise<undefined>;
+```
+
+ * Creates directory at `filepath` location.
+ * Optionally include `MkdirOptions` with properties:
+   * (iOS) - [NSURLIsExcludedFromBackupKey](https://developer.apple.com/documentation/foundation/nsurlisexcludedfrombackupkey)
+   * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
 
 #### moveFile
+```ts
+await RNFS.moveFile('FileToMove', 'DestinationLocation')
+// moveFile(filepath: string, destPath: string, options?: FileOptions): Promise<undefined>;
+```
+
+* Moves file from `filepath` to `destPath`
+* Optionally includes `FileOptions` with properties:
+  * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
 
 #### copyFile
+```ts
+await RNFS.copyFile('FileToCopy', 'DestinationLocation')
+// copyFile(filepath: string, destPath: string, options?: FileOptions): Promise<undefined>;
+```
+
+* Copies file from `filepath` to `destPath`
+* Optionally includes `FileOptions` with properties:
+  * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
 
 #### getFSInfo
 
