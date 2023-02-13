@@ -101,30 +101,6 @@ await RNFS.exists('File')
 ```
 * Check if the item exists at `filepath`. If the item does not exist, return false.
 
-
-### `stopDownload`
-```ts
-// stopDownload(jobId: number): void
-await RNFS.stopDownload('JobID'): void
-```
-* Abort the current download job with this ID. The partial file will remain on the filesystem.
-
-### `resumeDownload` (iOS Only)
-```ts
-// resumeDownload(jobId: number): void
-await RNFS.resumeDownload('JobID'): void
-```
-* Resume the current download job with this ID
-
-### `isResumable` (iOS Only)
-```ts
-// isResumable(jobId: number): Promise<bool>
-if (await RNFS.isResumable('JobID')) {
-    RNFS.resumeDownload('JobID')
-}
-```
-* Check if the the download job with this ID is resumable.
-
 ### `completeHandlerIOS` (iOS Only)
 ```ts
 // completeHandlerIOS(jobId: number): void
@@ -167,7 +143,7 @@ const fileData = await RNFS.readFile('DirPath', 'utf8')
     filepath: string,
     length: number = 0,
     position: number = 0,
-    encoding?: Encoding
+    encodingOrOptions?: EncodingOrOptions
   ): Promise<string> 
 */
 
@@ -188,7 +164,7 @@ const fileChecksum = await RNFS.hash('FileToHash', 'md5')
 
 ### `writeFile`
 ```ts
-// writeFile(filepath: string, contents: string, encoding?: Encoding): Promise<void>
+// writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void>
 await RNFS.write('FileToWrite', 'ContentsToWrite', 'utf8')
 ```
 * Write the `contents` to `filepath`
@@ -232,11 +208,9 @@ const fileStats = await RNFS.stat('FilePath')
   * mtime: `date` -> The last modified date of the file
   * size: `number` -> Size in bytes
   * mode: `number` -> UNIX file mode
-  * originalFilepath: `string` -> ANDROID: In case of content uri this is the pointed file path, otherwise is the same as path
+  * originalFilepath: `string` -> Android: In case of content uri this is the pointed file path, otherwise is the same as path
   * isFile: () => `boolean` -> Is the file just a file?
   * isDirectory: () => `boolean` -> Is the file a directory?
-
-
 
 ### `downloadFile`
 ```ts
@@ -266,12 +240,35 @@ const downloadResults = await RNFS.downloadFile('FilePath')
   * statusCode: `number`     -> The HTTP status code
   * bytesWritten: `number`   -> The number of bytes written to the file
 
+### `stopDownload`
+```ts
+// stopDownload(jobId: number): void
+await RNFS.stopDownload('JobID'): void
+```
+* Abort the current download job with this ID. The partial file will remain on the filesystem.
+
+### `resumeDownload` (iOS Only)
+```ts
+// resumeDownload(jobId: number): void
+await RNFS.resumeDownload('JobID'): void
+```
+* Resume the current download job with this ID
+
+### `isResumable` (iOS Only)
+```ts
+// isResumable(jobId: number): Promise<bool>
+if (await RNFS.isResumable('JobID')) {
+    RNFS.resumeDownload('JobID')
+}
+```
+* Check if the the download job with this ID is resumable.
+
 ### `touch`
 ```ts
 // touch(filepath: string, mtime?: Date, ctime?: Date): Promise<void>
 await RNFS.touch('FilePath', Date, Date)
 ```
-* Sets the modification timestamp `mtime` and creation timestamp `ctime` of the file at `filepath`. Setting `ctime` is only supported on iOS, android always sets both timestamps to `mtime`.
+* Sets the modification timestamp `mtime` and creation timestamp `ctime` of the file at `filepath`. Setting `ctime` is only supported on iOS, Android always sets both timestamps to `mtime`.
 
 ### `scanFile` (Android Only)
 ```ts
