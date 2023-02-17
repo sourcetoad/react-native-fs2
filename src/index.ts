@@ -101,7 +101,7 @@ export default {
     return RNFSManager.getFSInfo();
   },
 
-  getAllExternalFilesDirs(): Promise<string> {
+  getAllExternalFilesDirs(): Promise<string[]> {
     return RNFSManager.getAllExternalFilesDirs();
   },
 
@@ -183,7 +183,7 @@ export default {
     return RNFSManager.hash(normalizeFilePath(filepath), algorithm);
   },
 
-  writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<null> {
+  writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void> {
     const options = parseOptions(encodingOrOptions);
     const b64 = encodeContents(contents, options.encoding);
 
@@ -282,7 +282,7 @@ export default {
     return RNFSManager.touch(normalizeFilePath(filepath), mtime && mtime.getTime(), ctimeTime);
   },
 
-  scanFile(path: string): Promise<ReadDirItem[]> {
+  scanFile(path: string): Promise<string[]> {
     return RNFSManager.scanFile(path);
   },
 

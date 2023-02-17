@@ -42,10 +42,10 @@ export type DownloadFileOptions = {
   cacheable?: boolean; // Whether the download can be stored in the shared NSURLCache (iOS only)
   progressInterval?: number;
   progressDivider?: number;
-  begin?: (res: DownloadBeginCallbackResult) => void;
+  begin?: (res: DownloadBeginCallbackResult) => void; // Note: it is required when progress prop provided
   progress?: (res: DownloadProgressCallbackResult) => void;
-  resumable?: () => void; // only supported on iOS yet
-  connectionTimeout?: number; // only supported on Android yet
+  resumable?: () => void; // only supported on iOS
+  connectionTimeout?: number; // only supported on Android
   readTimeout?: number; // supported on Android and iOS
   backgroundTimeout?: number; // Maximum time (in milliseconds) to download an entire resource (iOS only, useful for timing out background downloads)
 };
