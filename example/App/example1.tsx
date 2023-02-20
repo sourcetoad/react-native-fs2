@@ -1,7 +1,6 @@
 import React, {useState} from 'react';
 import RNFS from 'react-native-fs2';
 import {StyleSheet, Text, View, Button, Platform, ActivityIndicator, PermissionsAndroid} from 'react-native';
-import {decode as atob} from 'base-64';
 import {getTestFolder, getFolderText, requestAndroidPermission} from './utils';
 
 const Example = () => {
@@ -52,9 +51,9 @@ const Example = () => {
       runStatus = `${runStatus}\n- Reading text file "example1.txt"`;
       setResult(runStatus);
 
-      const data = await RNFS.readFile(readPath, 'base64');
+      const data = await RNFS.readFile(readPath, 'utf8');
 
-      runStatus = `${runStatus}\n- "example1.txt" contains: ${atob(data)}`;
+      runStatus = `${runStatus}\n- "example1.txt" contains: ${data}`;
       setResult(runStatus);
     } catch (err) {
       setResult('Error Running Example');
