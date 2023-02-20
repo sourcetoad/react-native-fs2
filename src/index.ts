@@ -162,7 +162,7 @@ export default {
     const options = parseOptions(encodingOrOptions);
 
     return RNFSManager.readFile(normalizeFilePath(filepath)).then((b64: string) => {
-      return encodeContents(b64, options.encoding);
+      return decodeContents(b64, options.encoding);
     });
   },
 
