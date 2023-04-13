@@ -41,7 +41,7 @@ public class Downloader extends AsyncTask<DownloadParams, long[], DownloadResult
 
   private void download(DownloadParams param, DownloadResult res) throws Exception {
     InputStream input = null;
-    OutputStream output = null;
+    FileOutputStream output = null;
     HttpURLConnection connection = null;
 
     try {
@@ -141,6 +141,7 @@ public class Downloader extends AsyncTask<DownloadParams, long[], DownloadResult
         }
 
         output.flush();
+        output.getFD().sync();
         res.bytesWritten = total;
       }
       res.statusCode = statusCode;
