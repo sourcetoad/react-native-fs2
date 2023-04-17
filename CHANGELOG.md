@@ -1,5 +1,9 @@
 # Changelog
 
+# v3.0.4 (April 13, 2023)
+ * Add automatic updates via Dependabot for GitHub Actions
+ * [#26](https://github.com/sourcetoad/react-native-fs2/pull/26) - Fix corrupt images if OS buffer is non-empty after flush.
+
 # v3.0.3 (February 20, 2023)
  * [#22](https://github.com/sourcetoad/react-native-fs2/issues/22) - Fix double encoding on `readFile`
  * Add documentation and examples
