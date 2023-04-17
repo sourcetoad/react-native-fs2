@@ -1,5 +1,8 @@
 # Changelog
 
+# v3.0.5 (April 17, 2023)
+ * Properly tag v3.0.4 (re-tag as 3.0.5)
+
 # v3.0.4 (April 13, 2023)
  * Add automatic updates via Dependabot for GitHub Actions
  * [#26](https://github.com/sourcetoad/react-native-fs2/pull/26) - Fix corrupt images if OS buffer is non-empty after flush.
