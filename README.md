@@ -215,7 +215,7 @@ const fileStats = await RNFS.stat('FilePath')
 ### `downloadFile`
 ```ts
 // downloadFile(options: DownloadFileOptions): { jobId: number, promise: Promise<DownloadResult> }
-const downloadResults = await RNFS.downloadFile('FilePath')
+const downloadResults = await RNFS.downloadFile('FilePath').promise
 ```
 * Downloads file from `options.fromUrl` to `options.toFile`.  Will overwrite any previously existing file.
 <br/><br/>
