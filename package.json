@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "lint": "eslint \"src/*.{js,ts,tsx}\"",
-    "prepare": "bob build",
+    "build": "bob build",
     "example:android": "cd example; yarn run android",
     "example:ios": "cd example; yarn run ios"
   },
