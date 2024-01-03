@@ -20,7 +20,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: NPM Install
-        run: npm install --network-concurrency 1
+        run: npm ci --network-concurrency 1
 
       - name: Publish (NPM)
         run: npm publish --access public
