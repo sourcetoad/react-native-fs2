@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "lint": "eslint \"src/*.{js,ts,tsx}\"",
+    "check-types": "tsc --noEmit --project tsconfig.build.json",
     "build": "bob build",
     "example:android": "cd example; yarn run android",
     "example:ios": "cd example; yarn run ios"
