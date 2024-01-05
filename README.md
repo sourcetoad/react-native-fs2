@@ -20,7 +20,7 @@ We will continue to support this library for as long as we use it.
 
 ### Installation
 ```bash
-yarn add react-native-fs2
+npm i --save react-native-fs2
 ```
 
 #### Supported React Native Versions
@@ -144,12 +144,12 @@ const fileData = await RNFS.readFile('DirPath', 'utf8')
     length: number = 0,
     position: number = 0,
     encodingOrOptions?: EncodingOrOptions
-  ): Promise<string> 
+  ): Promise<string>
 */
 
 const fileData = await RNFS.read('FileToRead', 0, 0, 'utf8')
 ```
-* Reads bytes length from the given position of the file at `filepath` and returns the file `contents`. 
+* Reads bytes length from the given position of the file at `filepath` and returns the file `contents`.
 * Optionally includes `EncodingOrOptions` with values:
   * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
   * ...fileoptions
@@ -175,7 +175,7 @@ await RNFS.write('FileToWrite', 'ContentsToWrite', 'utf8')
 
 ### `appendFile`
 ```ts
-// appendFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void> 
+// appendFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void>
 await RNFS.appendFile('FileToWrite', 'ContentsToAppend', 'utf8')
 ```
 * Append the `contents` to `filepath`
