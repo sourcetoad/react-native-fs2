@@ -1,5 +1,11 @@
 # Changelog
 
+# v3.1.0 (January 5, 2024)
+ * [#42](https://github.com/sourcetoad/react-native-fs2/pull/42) - Switch to NPM from Yarn
+ * [#41](https://github.com/sourcetoad/react-native-fs2/pull/41) - Update example app to RN 0.73.x
+ * [#35](https://github.com/sourcetoad/react-native-fs2/pull/35) - Update example app to RN 0.72.x
+ * Automatic updates via Dependabot
+
 # v3.0.5 (April 17, 2023)
  * Properly tag v3.0.4 (re-tag as 3.0.5)
 
