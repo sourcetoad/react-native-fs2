@@ -14,6 +14,14 @@ import type {
   ProcessedOptions,
 } from './types';
 
+let blobJSIHelper: any;
+try {
+  blobJSIHelper = require('react-native-blob-jsi-helper');
+} catch (e) {
+  // ignore
+  blobJSIHelper = null;
+}
+
 const RNFSManager = NativeModules.RNFSManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
@@ -82,6 +90,24 @@ function decodeContents(b64: string, encoding: Encoding): string {
   }
 
   throw new Error('Invalid encoding type "' + String(encoding) + '"');
+}
+
+function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    if (!blobJSIHelper) {
+      reject(new Error('react-native-blob-jsi-helper is not installed'));
+      return;
+    }
+
+    fetch(normalizeFilePath(filePath))
+      .then((response) => response.blob())
+      .then((blob) => {
+        resolve(blobJSIHelper.getArrayBufferForBlob(blob));
+      })
+      .catch((error) => {
+        reject(error);
+      });
+  });
 }
 
 export default {
@@ -158,8 +184,12 @@ export default {
     });
   },
 
-  readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string> {
+  readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string | ArrayBuffer> {
     const options = parseOptions(encodingOrOptions);
+
+    if (options.encoding === 'arraybuffer') {
+      return getArrayBuffer(filepath);
+    }
 
     return RNFSManager.readFile(normalizeFilePath(filepath)).then((b64: string) => {
       return decodeContents(b64, options.encoding);

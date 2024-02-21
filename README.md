@@ -132,9 +132,10 @@ const fileData = await RNFS.readFile('DirPath', 'utf8')
 ```
 * Reads the `filepath` and return the file `contents`
 * Optionally includes `EncodingOrOptions` with values:
-  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
+  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
   * ...fileoptions
-
+* Note: `arraybuffer` requires [react-native-blob-jsi-helper](https://github.com/mrousavy/react-native-blob-jsi-helper)
+  * `npm i react-native-blob-jsi-helper` or `yarn add react-native-blob-jsi-helper`
 
 ### `read`
 ```ts

@@ -55,6 +55,15 @@ const Example = () => {
 
       runStatus = `${runStatus}\n- "example1.txt" contains: ${data}`;
       setResult(runStatus);
+
+      // array buffer
+      runStatus = `${runStatus}\n- Reading ArrayBuffer from "example1.txt"`;
+      setResult(runStatus);
+
+      const arrayBuffer = await RNFS.readFile(readPath, 'arraybuffer');
+      if (typeof arrayBuffer !== 'string') {
+        setResult(`${runStatus}\n- Got ArrayBuffer - Size: ${arrayBuffer.byteLength}`);
+      }
     } catch (err) {
       setResult('Error Running Example');
     } finally {

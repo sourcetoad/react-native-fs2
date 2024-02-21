@@ -121,5 +121,8 @@
         }
       ]
     ]
+  },
+  "optionalDependencies": {
+    "react-native-blob-jsi-helper": "^0.3.1"
   }
 }
