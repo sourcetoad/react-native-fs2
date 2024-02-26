@@ -1,5 +1,10 @@
 # Changelog
 
+# v3.1.1 (February 26, 2024)
+ * [#44](https://github.com/sourcetoad/react-native-fs2/pull/44) - Add ArrayBuffer support.
+ * [#45](https://github.com/sourcetoad/react-native-fs2/pull/45) - ip upgrade to v1.1.9 (example).
+ * [#46](https://github.com/sourcetoad/react-native-fs2/pull/46) - ip upgrade to v1.1.9.
+
 # v3.1.0 (January 5, 2024)
  * [#42](https://github.com/sourcetoad/react-native-fs2/pull/42) - Switch to NPM from Yarn
  * [#41](https://github.com/sourcetoad/react-native-fs2/pull/41) - Update example app to RN 0.73.x
