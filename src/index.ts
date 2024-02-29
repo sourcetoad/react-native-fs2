@@ -99,7 +99,7 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
       return;
     }
 
-    fetch(normalizeFilePath(filePath))
+    fetch(filePath)
       .then((response) => response.blob())
       .then((blob) => {
         resolve(blobJSIHelper.getArrayBufferForBlob(blob));
