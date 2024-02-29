@@ -1,5 +1,8 @@
 # Changelog
 
+# v3.1.3 (February 29, 2024)
+ * Properly tag v3.1.2 (re-tag as 3.1.3)
+
 # v3.1.2 (February 29, 2024)
  * [#45](https://github.com/sourcetoad/react-native-fs2/pull/48) - Fix ArrayBuffer return on Android.
 
