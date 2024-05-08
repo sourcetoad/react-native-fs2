@@ -16,6 +16,7 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '12.4'
 
   s.source          = { :git => "https://github.com/sourcetoad/react-native-fs2", :tag => "v#{s.version}" }
+  s.resource_bundles = { 'RNFS_PrivacyInfo' => 'ios/PrivacyInfo.xcprivacy' }
   s.source_files    = "ios/*.{h,m}"
   s.preserve_paths  = "src/*.{js,ts}"
 
