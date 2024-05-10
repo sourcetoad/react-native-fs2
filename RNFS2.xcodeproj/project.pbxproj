@@ -27,7 +27,8 @@
 /* Begin PBXFileReference section */
 		8BF740751C033A2E0057A1E7 /* Downloader.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Downloader.h; path = ios/Downloader.h; sourceTree = "<group>"; };
 		8BF740761C033A2E0057A1E7 /* Downloader.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = Downloader.m; path = ios/Downloader.m; sourceTree = "<group>"; };
-		F12AFB9B1ADAF8F800E0535D /* libRNFS.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libRNFS.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB23E8B62BEEA450005CB009 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = ios/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F12AFB9B1ADAF8F800E0535D /* libRNFS.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; name = libRNFS.a; path = libRNFS2.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1E59BDD1ADD662800ACA28A /* RNFSManager.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = RNFSManager.h; path = ios/RNFSManager.h; sourceTree = "<group>"; };
 		F1E59BDE1ADD662800ACA28A /* RNFSManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = RNFSManager.m; path = ios/RNFSManager.m; sourceTree = "<group>"; };
 		F1EB08B91AFD0E6A008F8F2B /* NSArray+Map.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "NSArray+Map.h"; path = "ios/NSArray+Map.h"; sourceTree = "<group>"; };
@@ -48,6 +49,7 @@
 		F12AFB921ADAF8F800E0535D = {
 			isa = PBXGroup;
 			children = (
+				AB23E8B62BEEA450005CB009 /* PrivacyInfo.xcprivacy */,
 				F1EB08B91AFD0E6A008F8F2B /* NSArray+Map.h */,
 				F1EB08BA1AFD0E6A008F8F2B /* NSArray+Map.m */,
 				F1E59BDD1ADD662800ACA28A /* RNFSManager.h */,
@@ -71,7 +73,7 @@
 /* Begin PBXNativeTarget section */
 		F12AFB9A1ADAF8F800E0535D /* RNFS2 */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = F12AFBAF1ADAF8F800E0535D /* Build configuration list for PBXNativeTarget "RNFS" */;
+			buildConfigurationList = F12AFBAF1ADAF8F800E0535D /* Build configuration list for PBXNativeTarget "RNFS2" */;
 			buildPhases = (
 				F12AFB971ADAF8F800E0535D /* Sources */,
 				F12AFB981ADAF8F800E0535D /* Frameworks */,
@@ -100,7 +102,7 @@
 					};
 				};
 			};
-			buildConfigurationList = F12AFB961ADAF8F800E0535D /* Build configuration list for PBXProject "RNFS" */;
+			buildConfigurationList = F12AFB961ADAF8F800E0535D /* Build configuration list for PBXProject "RNFS2" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
