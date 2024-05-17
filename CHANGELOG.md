@@ -1,5 +1,8 @@
 # Changelog
 
+# v3.2.0 (May 17, 2024)
+ * [#51](https://github.com/sourcetoad/react-native-fs2/pull/51) - Add Privacy Manifest support.
+
 # v3.1.3 (February 29, 2024)
  * Properly tag v3.1.2 (re-tag as 3.1.3)
 
