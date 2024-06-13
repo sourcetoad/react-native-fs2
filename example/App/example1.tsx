@@ -60,11 +60,16 @@ const Example = () => {
       runStatus = `${runStatus}\n- Reading ArrayBuffer from "example1.txt"`;
       setResult(runStatus);
 
-      const arrayBuffer = await RNFS.readFile(readPath, 'arraybuffer');
+      let osFilePath = readPath;
+      if (Platform.OS === 'android') {
+        osFilePath = `file://${readPath}`;
+      }
+      const arrayBuffer = await RNFS.readFile(osFilePath, 'arraybuffer');
       if (typeof arrayBuffer !== 'string') {
         setResult(`${runStatus}\n- Got ArrayBuffer - Size: ${arrayBuffer.byteLength}`);
       }
     } catch (err) {
+      console.log(err);
       setResult('Error Running Example');
     } finally {
       setRunningAction(false);
