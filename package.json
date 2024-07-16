@@ -1,6 +1,6 @@
 {
   "name": "react-native-fs2",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "Native filesystem access for react-native",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
