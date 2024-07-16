@@ -1,5 +1,9 @@
 # Changelog
 
+# v3.2.1 (July 16, 2024)
+ * [#52](https://github.com/sourcetoad/react-native-fs2/pull/54) - Support RN74
+ * Automatic updates via Dependabot
+
 # v3.2.0 (May 17, 2024)
  * [#51](https://github.com/sourcetoad/react-native-fs2/pull/51) - Add Privacy Manifest support.
 
