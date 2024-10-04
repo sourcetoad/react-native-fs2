@@ -12,6 +12,8 @@ import type {
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
+  filedescriptor,
+  MediaTypes,
 } from './types';
 
 let blobJSIHelper: any;
@@ -23,6 +25,7 @@ try {
 }
 
 const RNFSManager = NativeModules.RNFSManager;
+const RNFSMediaStoreManager = NativeModules.RNFSMediaStoreManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
 // Since we are mapping enums from their native counterpart. We must allow these to fail if run
@@ -109,6 +112,25 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
       });
   });
 }
+
+const MediaStore = {
+  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<any> {
+    if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
+    return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
+  },
+
+  writeToMediaFile(uri: string, path: string) {
+    return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
+  },
+
+  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string) {
+    return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
+  },
+
+  MEDIA_AUDIO: 'Audio' as MediaTypes,
+  MEDIA_IMAGE: 'Image' as MediaTypes,
+  MEDIA_VIDEO: 'Video' as MediaTypes,
+};
 
 export default {
   mkdir(filepath: string, options: MkdirOptions = {}): Promise<undefined> {
@@ -315,6 +337,8 @@ export default {
   scanFile(path: string): Promise<string[]> {
     return RNFSManager.scanFile(path);
   },
+
+  MediaStore,
 
   MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
   CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,
