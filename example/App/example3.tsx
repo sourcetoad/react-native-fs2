@@ -70,7 +70,7 @@ const Example = () => {
       <Text style={styles.subTitle}>This example will:</Text>
 
       <Text style={styles.action}>
-        - Adds an entry to <Text style={styles.textBold}>MediaStore.Downloads</Text>
+        - Adds an entry to <Text style={styles.textBold}>MediaStore.Image</Text>
       </Text>
 
       <Text style={styles.action}>- accesses that image and displays it below: </Text>
