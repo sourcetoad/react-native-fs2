@@ -152,17 +152,8 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
   @ReactMethod
   public void exists(String fileUri, Promise promise) {
     try {
-      Uri uri = Uri.parse(fileUri);
-      ContentResolver resolver = reactContext.getContentResolver();
-      Cursor cursor = resolver.query(uri, null, null, null, null);
-      if (cursor != null && cursor.getCount() > 0) {
-        promise.resolve(true);
-      } else {
-        promise.resolve(false);
-      }
-      if (cursor != null) {
-        cursor.close();
-      }
+      boolean fileExists = exists(fileUri, reactContext);
+      promise.resolve(fileExists);
     } catch (Exception e) {
       promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
     }
@@ -322,6 +313,32 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       }
 
       return true;
+    } else {
+
+      // throw error not supported
+      return false;
+    }
+  }
+
+  public static boolean exists(String fileUri, ReactApplicationContext ctx) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      Cursor cursor = null;
+      try {
+        Context appCtx = ctx.getApplicationContext();
+        ContentResolver resolver = appCtx.getContentResolver();
+
+        Uri uri = Uri.parse(fileUri);
+        String[] projection = {MediaStore.MediaColumns._ID};
+        cursor = resolver.query(uri, projection, null, null, null);
+
+        return cursor != null && cursor.getCount() > 0;
+      } catch (Exception e) {
+        return false;
+      } finally {
+        if (cursor != null) {
+          cursor.close();
+        }
+      }
     } else {
       // throw error not supported
       return false;

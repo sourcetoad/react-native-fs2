@@ -114,7 +114,7 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
 }
 
 const MediaStore = {
-  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<String> {
+  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<string> {
     if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
     return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
   },
@@ -123,7 +123,7 @@ const MediaStore = {
     return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
   },
 
-  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string): Promise<String> {
+  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string): Promise<string> {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
   },
 

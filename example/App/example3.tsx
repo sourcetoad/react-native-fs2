@@ -164,7 +164,7 @@ const Example = () => {
         - Adds an entry to <Text style={styles.textBold}>MediaStore.Image</Text>
       </Text>
 
-      <Text style={styles.action}>- accesses that image and displays it below </Text>
+      <Text style={styles.action}>- access the image and displays it below </Text>
       <Text style={styles.action}>- Note: running the example again will overwrite existing media file</Text>
 
       <View style={styles.statusWrapper}>
