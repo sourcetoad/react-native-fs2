@@ -13,7 +13,7 @@ import type {
   EncodingOrOptions,
   ProcessedOptions,
   filedescriptor,
-  MediaTypes,
+  MediaCollections,
 } from './types';
 
 let blobJSIHelper: any;
@@ -114,7 +114,7 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
 }
 
 const MediaStore = {
-  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<string> {
+  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaCollections): Promise<string> {
     if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
     return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
   },
@@ -123,7 +123,7 @@ const MediaStore = {
     return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
   },
 
-  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string): Promise<string> {
+  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaCollections, path: string): Promise<string> {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
   },
 
@@ -135,10 +135,10 @@ const MediaStore = {
     return RNFSMediaStoreManager.delete(uri);
   },
 
-  MEDIA_AUDIO: 'Audio' as MediaTypes,
-  MEDIA_IMAGE: 'Image' as MediaTypes,
-  MEDIA_VIDEO: 'Video' as MediaTypes,
-  MEDIA_DOWNLOAD: 'Download' as MediaTypes,
+  MEDIA_AUDIO: 'Audio' as MediaCollections,
+  MEDIA_IMAGE: 'Image' as MediaCollections,
+  MEDIA_VIDEO: 'Video' as MediaCollections,
+  MEDIA_DOWNLOAD: 'Download' as MediaCollections,
 };
 
 export default {

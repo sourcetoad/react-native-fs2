@@ -41,7 +41,7 @@ const Example = () => {
           parentFolder: 'RNFSExample3Folder',
           mimeType: 'image/png',
         },
-        'Image',
+        RNFS.MediaStore.MEDIA_IMAGE,
         imagePath,
       );
 

@@ -83,4 +83,4 @@ export type Encoding = 'utf8' | 'base64' | 'ascii' | 'arraybuffer';
 export type EncodingOrOptions = Encoding | Record<string, any>;
 export type ProcessedOptions = Record<string, any | Encoding>;
 export type filedescriptor = { name: string; parentFolder: string; mimeType: string };
-export type MediaTypes = 'Audio' | 'Image' | 'Video' | 'Download';
+export type MediaCollections = 'Audio' | 'Image' | 'Video' | 'Download';
