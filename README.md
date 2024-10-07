@@ -278,8 +278,101 @@ await RNFS.scanFile('FilePath', Date, Date)
 ```
 * Scan the file using [Media Scanner](https://developer.android.com/reference/android/media/MediaScannerConnection).
 
+# MediaStore
 
-### Constants
+### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore. 
+
+### Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
+
+### This feature is only available on Android targeting API 29 or higher. And may require the following permissions:
+
+```xml
+<!-- Required only if your app needs to access images or photos that other apps created. -->
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+<!-- Required only if your app needs to access videos that other apps created. -->
+<uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+<!-- Required only if your app needs to access audio files that other apps created. -->
+<uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+```
+
+## Available Methods
+
+### `createMediaFile`
+
+* Creates a new media file in the MediaStore with the given `mimeType`. This will not create a file on the filesystem, but will create a reference in the MediaStore.
+
+```ts
+// createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaCollections): Promise<string>
+
+const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+
+const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE)
+```
+
+### `writeToMediaFile`
+
+* Writes data to a media file in the MediaStore with the given `mimeType`.
+
+```ts
+// writeToMediaFile((uri: string, path: string): Promise<void>
+
+await RNFS.MediaStore.writeToMediaFile('content://media/external/images/media/123', '/path/to/image/imageToWrite.png')
+```
+
+### `copyToMediaStore`
+
+* Copies the file at `filepath` to the MediaStore with the given `mimeType`.
+
+```ts
+// copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaCollections, path: string): Promise<string>
+
+const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+
+const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
+```
+
+### `existsInMediaStore`
+
+* Checks if the media file at `uri` exists in the MediaStore.
+
+```ts
+// existsInMediaStore(uri: string): Promise<boolean>
+
+await RNFS.MediaStore.existsInMediaStore('content://media/external/images/media/123')
+```
+
+### `deleteFromMediaStore`
+
+* Deletes the media file at `uri` from the MediaStore.
+
+```ts
+// deleteFromMediaStore(uri: string): Promise<boolean>
+
+await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
+```
+
+## filedescriptor
+```ts
+type filedescriptor = { 
+  name: string; 
+  parentFolder: string; 
+  mimeType: string 
+};
+```
+
+## MediaStore Collections
+ * `MediaStore.MEDIA_AUDIO` - Audio media collection
+ * `MediaStore.MEDIA_IMAGE` - Image media collection
+ * `MediaStore.MEDIA_VIDEO` - Video media collection
+ * `MediaStore.MEDIA_DOWNLOAD` - Download media collection
+
+## Constants
 
 #### Common
  * `CachesDirectoryPath` - Absolute path to cache directory.
