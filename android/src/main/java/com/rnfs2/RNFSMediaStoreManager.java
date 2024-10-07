@@ -149,6 +149,41 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     if (res) promise.resolve(fileuri.toString());
   }
 
+  @ReactMethod
+  public void exists(String fileUri, Promise promise) {
+    try {
+      Uri uri = Uri.parse(fileUri);
+      ContentResolver resolver = reactContext.getContentResolver();
+      Cursor cursor = resolver.query(uri, null, null, null, null);
+      if (cursor != null && cursor.getCount() > 0) {
+        promise.resolve(true);
+      } else {
+        promise.resolve(false);
+      }
+      if (cursor != null) {
+        cursor.close();
+      }
+    } catch (Exception e) {
+      promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
+    }
+  }
+
+  @ReactMethod
+  public void delete(String fileUri, Promise promise) {
+    try {
+      Uri uri = Uri.parse(fileUri);
+      ContentResolver resolver = reactContext.getContentResolver();
+      int res = resolver.delete(uri, null, null);
+      if (res > 0) {
+        promise.resolve(true);
+      } else {
+        promise.resolve(false);
+      }
+    } catch (Exception e) {
+      promise.reject("RNFS2.delete", "Error deleting file: " + e.getMessage());
+    }
+  }
+
   public static Uri createNewMediaFile(FileDescription file, MediaType mediaType, ReactApplicationContext ctx) {
     // Add a specific media item.
     Context appCtx = reactContext.getApplicationContext();
@@ -226,7 +261,6 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
               return false;
             }
 
-
             FileInputStream fin = new FileInputStream(src);
             FileOutputStream out = new FileOutputStream(descr.getFileDescriptor());
 
@@ -241,7 +275,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
               byte[] transformedBytes = RNFSFileTransformer.sharedFileTransformer.onWriteFile(bytes);
               out.write(transformedBytes);
             } else  {
-              byte[] buf = new byte[10240];
+              byte[] buf = new byte[1024 * 10];
               int read;
 
               while ((read = fin.read(buf)) > 0) {
@@ -291,25 +325,6 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     } else {
       // throw error not supported
       return false;
-    }
-  }
-
-  @ReactMethod
-  public void exists(String fileUri, Promise promise) {
-    try {
-      Uri uri = Uri.parse(fileUri);
-      ContentResolver resolver = reactContext.getContentResolver();
-      Cursor cursor = resolver.query(uri, null, null, null, null);
-      if (cursor != null && cursor.getCount() > 0) {
-        promise.resolve(true);
-      } else {
-        promise.resolve(false);
-      }
-      if (cursor != null) {
-        cursor.close();
-      }
-    } catch (Exception e) {
-      promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
     }
   }
 

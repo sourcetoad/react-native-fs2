@@ -23,7 +23,6 @@ const Example = () => {
   ) => {
     if (Platform.OS === 'android') {
       // Check if file already exist on MediaStore
-      // Happens when a queued job fails and is added back to queue again
       const contentExists = await RNFS.MediaStore.existsInMediaStore(imagePath);
 
       if (contentExists) {
@@ -68,7 +67,6 @@ const Example = () => {
     const destinationPath = `${destinationFolder}/${prefix}${imageFileName}`;
 
     // Check if file already exist on the destination path
-    // Happens when a queued job fails and is added back to queue again
     const fileExist = await RNFS.exists(destinationPath);
     if (fileExist) {
       // if overwrite flag is true then we replace the file with the new one
@@ -146,8 +144,6 @@ const Example = () => {
 
       setImageURI(contentURI);
 
-      // var imageContentURI = 'content://media/external_primary/images/media/1000000038';
-      // var downloadContentURI = 'content://media/external_primary/downloads/1000000040';
       const contentResult = await RNFS.readFile(contentURI, 'base64');
 
       setImage(`data:image/png;base64,${contentResult}`);

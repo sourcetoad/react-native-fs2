@@ -114,21 +114,25 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
 }
 
 const MediaStore = {
-  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<any> {
+  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaTypes): Promise<String> {
     if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
     return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
   },
 
-  writeToMediaFile(uri: string, path: string) {
+  writeToMediaFile(uri: string, path: string): Promise<void> {
     return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
   },
 
-  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string) {
+  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaTypes, path: string): Promise<String> {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
   },
 
-  existsInMediaStore(uri: string) {
+  existsInMediaStore(uri: string): Promise<boolean> {
     return RNFSMediaStoreManager.exists(uri);
+  },
+
+  deleteFromMediaStore(uri: string): Promise<boolean> {
+    return RNFSMediaStoreManager.delete(uri);
   },
 
   MEDIA_AUDIO: 'Audio' as MediaTypes,
