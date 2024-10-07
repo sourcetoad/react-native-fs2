@@ -127,9 +127,14 @@ const MediaStore = {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
   },
 
+  existsInMediaStore(uri: string) {
+    return RNFSMediaStoreManager.exists(uri);
+  },
+
   MEDIA_AUDIO: 'Audio' as MediaTypes,
   MEDIA_IMAGE: 'Image' as MediaTypes,
   MEDIA_VIDEO: 'Video' as MediaTypes,
+  MEDIA_DOWNLOAD: 'Download' as MediaTypes,
 };
 
 export default {

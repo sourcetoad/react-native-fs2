@@ -72,7 +72,8 @@ const App = () => {
 
           <Example1 />
           <Example2 />
-          <Example3 />
+
+          {Platform.OS === 'android' && <Example3 />}
         </View>
       </ScrollView>
     </SafeAreaView>

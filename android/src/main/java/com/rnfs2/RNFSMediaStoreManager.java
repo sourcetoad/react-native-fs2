@@ -42,11 +42,13 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     Audio,
     Image,
     Video,
+    Download,
   }
 
   private static final String RNFSMediaStoreTypeAudio = MediaType.Audio.toString();
   private static final String RNFSMediaStoreTypeImage = MediaType.Image.toString();;
   private static final String RNFSMediaStoreTypeVideo = MediaType.Video.toString();;
+  private static final String RNFSMediaStoreTypeDownload = MediaType.Download.toString();;
 
   public RNFSMediaStoreManager(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -78,6 +80,10 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       } else {
         res = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
       }
+    } else if (mt == MediaType.Download) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        res = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+      }
     }
 
     return res;
@@ -88,28 +94,13 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       if (mt == MediaType.Audio) return Environment.DIRECTORY_MUSIC;
       if (mt == MediaType.Video) return Environment.DIRECTORY_MOVIES;
       if (mt == MediaType.Image) return Environment.DIRECTORY_PICTURES;
+      if (mt == MediaType.Download) return Environment.DIRECTORY_DOWNLOADS;
       return Environment.DIRECTORY_DOWNLOADS;
     } else {
       // throw error not supported
       return null;
     }
   }
-
-//  @ReactMethod
-//  public void writeMediaStoreFile(Promise promise) {
-//  }
-//
-//  @ReactMethod
-//  public void getMediaStoreFile(Promise promise) {
-//  }
-//
-//  @ReactMethod
-//  public void deleteMediaStoreFile(Promise promise) {
-//  }
-//
-//  @ReactMethod
-//  public void exists(String fileName, String mediaType, Promise promise) {
-//  }
 
   @ReactMethod
   public void createMediaFile(ReadableMap filedata, String mediaType, Promise promise) {
@@ -303,6 +294,25 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
+  @ReactMethod
+  public void exists(String fileUri, Promise promise) {
+    try {
+      Uri uri = Uri.parse(fileUri);
+      ContentResolver resolver = reactContext.getContentResolver();
+      Cursor cursor = resolver.query(uri, null, null, null, null);
+      if (cursor != null && cursor.getCount() > 0) {
+        promise.resolve(true);
+      } else {
+        promise.resolve(false);
+      }
+      if (cursor != null) {
+        cursor.close();
+      }
+    } catch (Exception e) {
+      promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
+    }
+  }
+
   @Override
   public Map<String, Object> getConstants() {
     final Map<String, Object> constants = new HashMap<>();
@@ -310,6 +320,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     constants.put(RNFSMediaStoreTypeAudio, RNFSMediaStoreTypeAudio);
     constants.put(RNFSMediaStoreTypeImage, RNFSMediaStoreTypeImage);
     constants.put(RNFSMediaStoreTypeVideo, RNFSMediaStoreTypeVideo);
+    constants.put(RNFSMediaStoreTypeDownload, RNFSMediaStoreTypeDownload);
 
     return constants;
   }
