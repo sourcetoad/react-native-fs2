@@ -160,6 +160,18 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       return;
     }
 
+    // check if file at path exists first before proceeding on creating the media file
+    try {
+      File file = new File(path);
+      if (!file.exists()) {
+        promise.reject("RNFS2.copyToMediaStore", "No such file ('" + path + "')");
+        return;
+      }
+    } catch (Exception e) {
+        promise.reject("RNFS2.copyToMediaStore", "Error opening file: " + e.getMessage());
+        return;
+    }
+
     FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
     Uri fileuri = createNewMediaFile(file, MediaType.valueOf(mediaType), promise, reactContext);
 
@@ -232,7 +244,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     return null;
   }
 
-  public static boolean writeToMediaFile(Uri fileUri, String data, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
+  public static boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       try {
         Context appCtx = ctx.getApplicationContext();
@@ -253,9 +265,9 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
             assert fileUri != null;
             descr = appCtx.getContentResolver().openFileDescriptor(fileUri, "w");
             assert descr != null;
-            File src = new File(data);
+            File src = new File(filePath);
             if (!src.exists()) {
-              promise.reject("ENOENT", "No such file ('" + data + "')");
+              promise.reject("ENOENT", "No such file ('" + filePath + "')");
               return false;
             }
 
