@@ -120,11 +120,11 @@ const MediaStore = {
   },
 
   writeToMediaFile(uri: string, path: string): Promise<void> {
-    return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
+    return RNFSMediaStoreManager.writeToMediaFile(uri, normalizeFilePath(path), false);
   },
 
   copyToMediaStore(fileDescriptor: FileDescriptor, mediatype: MediaCollections, path: string): Promise<string> {
-    return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
+    return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, normalizeFilePath(path));
   },
 
   existsInMediaStore(uri: string): Promise<boolean> {
