@@ -146,6 +146,11 @@ const Example = () => {
       const contentResult = await RNFS.readFile(contentURI, 'base64');
 
       setImage(`data:image/png;base64,${contentResult}`);
+
+      const mediaStat = await RNFS.stat(contentURI);
+
+      runStatus = `${runStatus}\n- "Media File" stat: ${JSON.stringify(mediaStat)}`;
+      setResult(runStatus);
     } catch (err) {
       setResult(`${runStatus}\n- Error Running Example`);
       console.error(err);
@@ -160,7 +165,7 @@ const Example = () => {
       <Text style={styles.subTitle}>This example will:</Text>
 
       <Text style={styles.action}>
-        - Adds an entry to <Text style={styles.textBold}>MediaStore.Image</Text>
+        - Add an entry to <Text style={styles.textBold}>MediaStore.Image</Text>
       </Text>
 
       <Text style={styles.action}>- access the image and displays it below </Text>
