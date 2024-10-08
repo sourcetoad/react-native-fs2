@@ -11,7 +11,6 @@ const DUMMY_IMAGE =
 const Example = () => {
   const [runningAction, setRunningAction] = useState(false);
   const [result, setResult] = useState('');
-  const [image, setImage] = useState('');
   const [imageURI, setImageURI] = useState('');
 
   const copyImageToMediaStore = async (
@@ -143,10 +142,6 @@ const Example = () => {
 
       setImageURI(contentURI);
 
-      const contentResult = await RNFS.readFile(contentURI, 'base64');
-
-      setImage(`data:image/png;base64,${contentResult}`);
-
       const mediaStat = await RNFS.stat(contentURI);
 
       runStatus = `${runStatus}\n- "Media File" stat: ${JSON.stringify(mediaStat)}`;
@@ -176,7 +171,7 @@ const Example = () => {
         <Text>{result}</Text>
       </View>
 
-      <View>{!!image && <Image source={{uri: image}} style={{width: 100, height: 100}} />}</View>
+      <View>{!!imageURI && <Image source={{uri: imageURI}} style={{width: 100, height: 100}} />}</View>
 
       <View style={{marginTop: 10}}>
         <Button title="Run Example3" color="#2644bc" onPress={executeExample} />
