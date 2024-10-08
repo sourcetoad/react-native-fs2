@@ -308,7 +308,7 @@ await RNFS.scanFile('FilePath', Date, Date)
 * Creates a new media file in the MediaStore with the given `mimeType`. This will not create a file on the filesystem, but will create a reference in the MediaStore.
 
 ```ts
-// createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaCollections): Promise<string>
+// createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
 
 const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
@@ -357,9 +357,9 @@ await RNFS.MediaStore.existsInMediaStore('content://media/external/images/media/
 await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
 ```
 
-## filedescriptor
+## FileDescriptor
 ```ts
-type filedescriptor = { 
+type FileDescriptor = { 
   name: string; 
   parentFolder: string; 
   mimeType: string 

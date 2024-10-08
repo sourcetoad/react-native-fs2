@@ -45,7 +45,6 @@ const Example = () => {
         imagePath,
       );
 
-      // TODO return content URI
       return contentURI;
     }
 
@@ -92,8 +91,8 @@ const Example = () => {
       if (fileStat?.size > 0 && fileStat?.isFile()) {
         return destinationPath;
       }
-    } catch {
-      console.log('File does not exist');
+    } catch (err) {
+      console.error('File does not exist', err);
     }
 
     // otherwise copy file to destination path
@@ -148,8 +147,8 @@ const Example = () => {
 
       setImage(`data:image/png;base64,${contentResult}`);
     } catch (err) {
-      console.log(err);
       setResult(`${runStatus}\n- Error Running Example`);
+      console.error(err);
     } finally {
       setRunningAction(false);
     }
@@ -210,7 +209,9 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
   },
-  textBold: {fontWeight: 'bold'},
+  textBold: {
+    fontWeight: 'bold',
+  },
   statusWrapper: {
     padding: 20,
   },

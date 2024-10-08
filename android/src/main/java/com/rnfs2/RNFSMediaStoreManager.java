@@ -91,10 +91,22 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
   private static String getRelativePath(MediaType mt, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      if (mt == MediaType.Audio) return Environment.DIRECTORY_MUSIC;
-      if (mt == MediaType.Video) return Environment.DIRECTORY_MOVIES;
-      if (mt == MediaType.Image) return Environment.DIRECTORY_PICTURES;
-      if (mt == MediaType.Download) return Environment.DIRECTORY_DOWNLOADS;
+      if (mt == MediaType.Audio) {
+        return Environment.DIRECTORY_MUSIC;
+      }
+
+      if (mt == MediaType.Video) {
+        return Environment.DIRECTORY_MOVIES;
+      }
+
+      if (mt == MediaType.Image) {
+        return Environment.DIRECTORY_PICTURES;
+      }
+
+      if (mt == MediaType.Download) {
+        return Environment.DIRECTORY_DOWNLOADS;
+      }
+
       return Environment.DIRECTORY_DOWNLOADS;
     } else {
       // throw error not supported
@@ -105,54 +117,67 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
   @ReactMethod
   public void createMediaFile(ReadableMap filedata, String mediaType, Promise promise) {
     if (!(filedata.hasKey("name") && filedata.hasKey("parentFolder") && filedata.hasKey("mimeType"))) {
-      promise.reject("RNFS2.createMediaFile", "invalid filedata: " + filedata.toString());
+      promise.reject("RNFS2.createMediaFile", "Invalid filedata: " + filedata.toString());
       return;
     }
-    if (mediaType == null) promise.reject("RNFS2.createMediaFile", "invalid mediatype");
+
+    if (mediaType == null) {
+      promise.reject("RNFS2.createMediaFile", "Invalid mediatype");
+    }
 
     FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
-    Uri res = createNewMediaFile(file, MediaType.valueOf(mediaType), reactContext);
-    if (res != null) promise.resolve(res.toString());
-    else promise.reject("RNFS2.createMediaFile", "File could not be created");
+    Uri res = createNewMediaFile(file, MediaType.valueOf(mediaType), promise, reactContext);
+
+    if (res != null) {
+      promise.resolve(res.toString());
+    } else {
+      promise.reject("RNFS2.createMediaFile", "File could not be created");
+    }
   }
 
   @ReactMethod
   public void writeToMediaFile(String fileUri, String path, boolean transformFile, Promise promise) {
     boolean res = writeToMediaFile(Uri.parse(fileUri), path, transformFile, promise, reactContext);
-    if (res) promise.resolve("Success");
+    if (res) {
+      promise.resolve("Success");
+    }
   }
 
   @ReactMethod
   public void copyToMediaStore(ReadableMap filedata, String mediaType, String path, Promise promise) {
     if (!(filedata.hasKey("name") && filedata.hasKey("parentFolder") && filedata.hasKey("mimeType"))) {
-      promise.reject("RNFS2.createMediaFile", "invalid filedata: " + filedata.toString());
+      promise.reject("RNFS2.copyToMediaStore", "Invalid filedata: " + filedata.toString());
       return;
     }
+
     if (mediaType == null) {
-      promise.reject("RNFS2.createMediaFile", "invalid mediatype");
+      promise.reject("RNFS2.copyToMediaStore", "Invalid mediatype");
       return;
     }
+
     if (path == null) {
-      promise.reject("RNFS2.createMediaFile", "invalid path");
+      promise.reject("RNFS2.copyToMediaStore", "Invalid path");
       return;
     }
 
     FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
-    Uri fileuri = createNewMediaFile(file, MediaType.valueOf(mediaType), reactContext);
+    Uri fileuri = createNewMediaFile(file, MediaType.valueOf(mediaType), promise, reactContext);
 
     if (fileuri == null) {
-      promise.reject("RNFS2.createMediaFile", "File could not be created");
+      promise.reject("RNFS2.copyToMediaStore", "File could not be created");
       return;
     }
 
     boolean res = writeToMediaFile(fileuri, path, false, promise, reactContext);
-    if (res) promise.resolve(fileuri.toString());
+    if (res) {
+      promise.resolve(fileuri.toString());
+    }
   }
 
   @ReactMethod
   public void exists(String fileUri, Promise promise) {
     try {
-      boolean fileExists = exists(fileUri, reactContext);
+      boolean fileExists = exists(fileUri, promise, reactContext);
       promise.resolve(fileExists);
     } catch (Exception e) {
       promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
@@ -175,7 +200,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
-  public static Uri createNewMediaFile(FileDescription file, MediaType mediaType, ReactApplicationContext ctx) {
+  public static Uri createNewMediaFile(FileDescription file, MediaType mediaType, Promise promise, ReactApplicationContext ctx) {
     // Add a specific media item.
     Context appCtx = reactContext.getApplicationContext();
     ContentResolver resolver = appCtx.getContentResolver();
@@ -200,26 +225,8 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         return null;
       }
     } else {
-      File f = new File(relativePath + file.getFullPath());
-      if (true) {
-        if (!f.exists()) {
-          File parent = f.getParentFile();
-          if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return null;
-          }
-          try {
-            if (f.createNewFile()) ;
-            {
-              return Uri.fromFile(f);
-            }
-          } catch (IOException ioException) {
-            return null;
-          }
-
-        } else {
-          return Uri.fromFile(f);
-        }
-      }
+      // throw error not supported
+      promise.reject("RNFS2.createNewMediaFile", "Android version not supported");
     }
 
     return null;
@@ -314,13 +321,13 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
       return true;
     } else {
-
       // throw error not supported
+      promise.reject("RNFS2.createMediaFile", "Android version not supported");
       return false;
     }
   }
 
-  public static boolean exists(String fileUri, ReactApplicationContext ctx) {
+  public static boolean exists(String fileUri, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       Cursor cursor = null;
       try {
@@ -341,6 +348,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       }
     } else {
       // throw error not supported
+      promise.reject("RNFS2.exists", "Android version not supported");
       return false;
     }
   }

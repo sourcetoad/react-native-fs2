@@ -12,7 +12,7 @@ import type {
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
-  filedescriptor,
+  FileDescriptor,
   MediaCollections,
 } from './types';
 
@@ -114,7 +114,7 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
 }
 
 const MediaStore = {
-  createMediaFile(fileDescriptor: filedescriptor, mediatype: MediaCollections): Promise<string> {
+  createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string> {
     if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
     return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
   },
@@ -123,7 +123,7 @@ const MediaStore = {
     return RNFSMediaStoreManager.writeToMediaFile(uri, path, false);
   },
 
-  copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaCollections, path: string): Promise<string> {
+  copyToMediaStore(fileDescriptor: FileDescriptor, mediatype: MediaCollections, path: string): Promise<string> {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, path);
   },
 
