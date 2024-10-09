@@ -250,11 +250,6 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         Context appCtx = ctx.getApplicationContext();
         ContentResolver resolver = appCtx.getContentResolver();
 
-        // set pending doesn't work right now. We would have to requery for the item
-        //ContentValues contentValues = new ContentValues();
-        //contentValues.put(MediaStore.MediaColumns.IS_PENDING, 1);
-        //resolver.update(fileUri, contentValues, null, null);
-
         // write data
         OutputStream stream = null;
         Uri uri = null;
@@ -302,9 +297,6 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
             return false;
           }
 
-          //contentValues.clear();
-          //contentValues.put(MediaStore.Video.Media.IS_PENDING, 0);
-          //appCtx.getContentResolver().update(fileUri, contentValues, null, null);
           stream = resolver.openOutputStream(fileUri);
           if (stream == null) {
             promise.reject(new IOException("Failed to get output stream."));
@@ -320,12 +312,6 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
             stream.close();
           }
         }
-
-        // remove pending
-        //contentValues = new ContentValues();
-        //contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
-        //resolver.update(fileUri, contentValues, null, null);
-
       } catch (IOException e) {
         promise.reject("RNFS2.createMediaFile", "Cannot write to file, file might not exist");
         return false;
