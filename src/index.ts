@@ -96,13 +96,24 @@ function decodeContents(b64: string, encoding: Encoding): string {
 }
 
 function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (!blobJSIHelper) {
       reject(new Error('react-native-blob-jsi-helper is not installed'));
       return;
     }
 
-    fetch(filePath)
+    let originalFilepath = filePath;
+    if (filePath.includes('content://')) {
+      const stat = await RNFSManager.stat(normalizeFilePath(filePath));
+
+      if (stat.originalFilepath.includes('file://')) {
+        originalFilepath = stat.originalFilepath;
+      } else {
+        originalFilepath = `file://${stat.originalFilepath}`;
+      }
+    }
+
+    fetch(originalFilepath)
       .then((response) => response.blob())
       .then((blob) => {
         resolve(blobJSIHelper.getArrayBufferForBlob(blob));
