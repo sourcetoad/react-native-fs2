@@ -11,7 +11,7 @@ public class FileDescription {
     mimeType = mT;
   }
 
-  public String getFullPath(){
+  public String getFullPath() {
     return partentFolder + "/" + MimeType.getFullFileName(name, mimeType);
   }
 }
