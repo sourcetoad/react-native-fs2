@@ -14,6 +14,8 @@ import type {
   ProcessedOptions,
   FileDescriptor,
   MediaCollections,
+  MediaStoreSearchOptions,
+  MediaStoreQueryResult,
 } from './types';
 
 let blobJSIHelper: any;
@@ -138,8 +140,8 @@ const MediaStore = {
     return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, normalizeFilePath(path));
   },
 
-  existsInMediaStore(uri: string): Promise<boolean> {
-    return RNFSMediaStoreManager.exists(uri);
+  queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult> {
+    return RNFSMediaStoreManager.query(searchOptions);
   },
 
   deleteFromMediaStore(uri: string): Promise<boolean> {

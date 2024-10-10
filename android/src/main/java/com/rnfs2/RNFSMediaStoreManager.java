@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
+import android.util.Log;
 
 import androidx.annotation.RequiresApi;
 
@@ -23,14 +24,17 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 
 import com.rnfs2.Utils.FileDescription;
+import com.rnfs2.Utils.MediaStoreQuery;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @ReactModule(name = RNFSMediaStoreManager.MODULE_NAME)
 public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
@@ -46,9 +50,9 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
   }
 
   private static final String RNFSMediaStoreTypeAudio = MediaType.Audio.toString();
-  private static final String RNFSMediaStoreTypeImage = MediaType.Image.toString();;
-  private static final String RNFSMediaStoreTypeVideo = MediaType.Video.toString();;
-  private static final String RNFSMediaStoreTypeDownload = MediaType.Download.toString();;
+  private static final String RNFSMediaStoreTypeImage = MediaType.Image.toString();
+  private static final String RNFSMediaStoreTypeVideo = MediaType.Video.toString();
+  private static final String RNFSMediaStoreTypeDownload = MediaType.Download.toString();
 
   public RNFSMediaStoreManager(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -168,8 +172,8 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         return;
       }
     } catch (Exception e) {
-        promise.reject("RNFS2.copyToMediaStore", "Error opening file: " + e.getMessage());
-        return;
+      promise.reject("RNFS2.copyToMediaStore", "Error opening file: " + e.getMessage());
+      return;
     }
 
     FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
@@ -187,12 +191,13 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void exists(String fileUri, Promise promise) {
+  public void query(ReadableMap query, Promise promise) {
     try {
-      boolean fileExists = exists(fileUri, promise, reactContext);
-      promise.resolve(fileExists);
+      MediaStoreQuery mediaStoreQuery = new MediaStoreQuery(query.getString("uri"), query.getString("fileName"), query.getString("relativePath"), query.getString("mediaType"));
+      WritableMap queryResult = query(mediaStoreQuery, promise, reactContext);
+      promise.resolve(queryResult);
     } catch (Exception e) {
-      promise.reject("RNFS2.exists", "Error checking file existence: " + e.getMessage());
+      promise.reject("RNFS2.query", "Error checking file existence: " + e.getMessage());
     }
   }
 
@@ -260,7 +265,9 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
             assert fileUri != null;
             descr = appCtx.getContentResolver().openFileDescriptor(fileUri, "w");
             assert descr != null;
+
             File src = new File(filePath);
+
             if (!src.exists()) {
               promise.reject("ENOENT", "No such file ('" + filePath + "')");
               return false;
@@ -325,20 +332,45 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
-  private boolean exists(String fileUri, Promise promise, ReactApplicationContext ctx) {
+  private WritableMap query(MediaStoreQuery query, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       Cursor cursor = null;
       try {
         Context appCtx = ctx.getApplicationContext();
         ContentResolver resolver = appCtx.getContentResolver();
+        WritableMap queryResultsMap = Arguments.createMap();
 
-        Uri uri = Uri.parse(fileUri);
-        String[] projection = {MediaStore.MediaColumns._ID};
-        cursor = resolver.query(uri, projection, null, null, null);
+        Uri mediaURI = !Objects.equals(query.uri, "") ? Uri.parse(query.uri) : getMediaUri(MediaType.valueOf(query.mediaType));
+        String[] projection = {MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH};
 
-        return cursor != null && cursor.getCount() > 0;
+        String selection = null;
+        String[] selectionArgs = null;
+
+        if (Objects.equals(query.uri, "")) {
+          String relativePath = getRelativePath(MediaType.valueOf(query.mediaType), ctx);
+          selection = MediaStore.MediaColumns.DISPLAY_NAME + " = ? AND " + MediaStore.MediaColumns.RELATIVE_PATH + " = ?";
+          selectionArgs = new String[]{query.fileName, relativePath + '/' + query.relativePath + '/'};
+        }
+
+        // query the media store
+        cursor = resolver.query(mediaURI, projection, selection, selectionArgs, null);
+
+        if (cursor != null && cursor.moveToFirst()) {
+          int idColumnIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+          long id = cursor.getLong(idColumnIndex);
+
+          Uri contentUri = Uri.withAppendedPath(mediaURI, String.valueOf(id));
+
+          queryResultsMap.putString("contentUri", contentUri.toString());
+          
+          promise.resolve(queryResultsMap);
+        } else {
+          promise.resolve(null);
+        }
+
+        return queryResultsMap;
       } catch (Exception e) {
-        return false;
+        return null;
       } finally {
         if (cursor != null) {
           cursor.close();
@@ -347,7 +379,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     } else {
       // throw error not supported
       promise.reject("RNFS2.exists", "Android version not supported");
-      return false;
+      return null;
     }
   }
 

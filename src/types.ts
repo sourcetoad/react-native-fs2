@@ -85,6 +85,17 @@ export type FileDescriptor = {
   mimeType: string;
 };
 
+export type MediaStoreSearchOptions = {
+  uri: string;
+  fileName: string;
+  relativePath: string;
+  mediaType: MediaCollections;
+};
+
+export type MediaStoreQueryResult = {
+  contentUri: string;
+};
+
 export type Encoding = 'utf8' | 'base64' | 'ascii' | 'arraybuffer';
 export type EncodingOrOptions = Encoding | Record<string, any>;
 export type ProcessedOptions = Record<string, any | Encoding>;

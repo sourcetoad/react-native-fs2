@@ -16,19 +16,24 @@ const Example = () => {
   const copyImageToMediaStore = async (
     imagePath: string,
     imageFileName: string,
-    folderName = 'RNFS2Example3Folder',
+    folderName = 'RNFSExample3Folder',
     prefix = '',
-    overwrite = '',
+    overwrite = false,
   ) => {
     if (Platform.OS === 'android') {
       // Check if file already exist on MediaStore
-      const contentExists = await RNFS.MediaStore.existsInMediaStore(imagePath);
+      const contentExists = await RNFS.MediaStore.queryMediaStore({
+        uri: '',
+        fileName: imageFileName,
+        relativePath: folderName,
+        mediaType: RNFS.MediaStore.MEDIA_IMAGE,
+      });
 
       if (contentExists) {
         // if overwrite flag is true then we replace the file with the new one
         if (overwrite) {
           // overwrite
-          await RNFS.MediaStore.writeToMediaFile(imagePath, overwrite);
+          await RNFS.MediaStore.writeToMediaFile(contentExists.contentUri, imagePath);
         }
 
         return imagePath;
@@ -37,7 +42,7 @@ const Example = () => {
       const contentURI = await RNFS.MediaStore.copyToMediaStore(
         {
           name: `${prefix}${imageFileName}`,
-          parentFolder: 'RNFSExample3Folder',
+          parentFolder: folderName,
           mimeType: 'image/png',
         },
         RNFS.MediaStore.MEDIA_IMAGE,
@@ -133,11 +138,11 @@ const Example = () => {
       }
 
       const contentURI = await copyImageToMediaStore(
-        imageURI || dummyImagePath,
-        'dummyImage2.png',
-        'RNFS2Example3Folder',
-        'prefix',
         dummyImagePath,
+        'dummyImage2.png',
+        'RNFSExample3Folder',
+        'prefix',
+        true,
       );
 
       setImageURI(contentURI);
