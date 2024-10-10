@@ -66,9 +66,6 @@ public class MimeType {
     }
   }
 
-  /**
-   *
-   */
   public static String stripEnd(String str, String stripChars) {
     if (str == null || stripChars == null) {
       return str;

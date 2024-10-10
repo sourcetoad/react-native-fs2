@@ -36,7 +36,7 @@ import java.util.Map;
 public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
   static final String MODULE_NAME = "RNFSMediaStoreManager";
-  private static ReactApplicationContext reactContext;
+  private final ReactApplicationContext reactContext;
 
   public enum MediaType {
     Audio,
@@ -52,7 +52,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
   public RNFSMediaStoreManager(ReactApplicationContext reactContext) {
     super(reactContext);
-    RNFSMediaStoreManager.reactContext = reactContext;
+    this.reactContext = reactContext;
   }
 
   @Override
@@ -212,7 +212,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
-  public static Uri createNewMediaFile(FileDescription file, MediaType mediaType, Promise promise, ReactApplicationContext ctx) {
+  private Uri createNewMediaFile(FileDescription file, MediaType mediaType, Promise promise, ReactApplicationContext ctx) {
     // Add a specific media item.
     Context appCtx = reactContext.getApplicationContext();
     ContentResolver resolver = appCtx.getContentResolver();
@@ -226,7 +226,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       fileDetails.put(MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000);
       fileDetails.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
       fileDetails.put(MediaStore.MediaColumns.DISPLAY_NAME, file.name);
-      fileDetails.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath + '/' + file.partentFolder);
+      fileDetails.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath + '/' + file.parentFolder);
 
       Uri mediauri = getMediaUri(mediaType);
 
@@ -244,7 +244,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     return null;
   }
 
-  public static boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
+  private boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       try {
         Context appCtx = ctx.getApplicationContext();
@@ -325,7 +325,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
-  public static boolean exists(String fileUri, Promise promise, ReactApplicationContext ctx) {
+  private boolean exists(String fileUri, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       Cursor cursor = null;
       try {
