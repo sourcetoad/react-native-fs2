@@ -12,6 +12,10 @@ import type {
   Encoding,
   EncodingOrOptions,
   ProcessedOptions,
+  FileDescriptor,
+  MediaCollections,
+  MediaStoreSearchOptions,
+  MediaStoreQueryResult,
 } from './types';
 
 let blobJSIHelper: any;
@@ -23,6 +27,7 @@ try {
 }
 
 const RNFSManager = NativeModules.RNFSManager;
+const RNFSMediaStoreManager = NativeModules.RNFSMediaStoreManager;
 const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
 
 // Since we are mapping enums from their native counterpart. We must allow these to fail if run
@@ -93,13 +98,24 @@ function decodeContents(b64: string, encoding: Encoding): string {
 }
 
 function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (!blobJSIHelper) {
       reject(new Error('react-native-blob-jsi-helper is not installed'));
       return;
     }
 
-    fetch(filePath)
+    let originalFilepath = filePath;
+    if (filePath.includes('content://')) {
+      const stat = await RNFSManager.stat(normalizeFilePath(filePath));
+
+      if (stat.originalFilepath.includes('file://')) {
+        originalFilepath = stat.originalFilepath;
+      } else {
+        originalFilepath = `file://${stat.originalFilepath}`;
+      }
+    }
+
+    fetch(originalFilepath)
       .then((response) => response.blob())
       .then((blob) => {
         resolve(blobJSIHelper.getArrayBufferForBlob(blob));
@@ -109,6 +125,34 @@ function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
       });
   });
 }
+
+const MediaStore = {
+  createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string> {
+    if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
+    return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
+  },
+
+  writeToMediaFile(uri: string, path: string): Promise<void> {
+    return RNFSMediaStoreManager.writeToMediaFile(uri, normalizeFilePath(path), false);
+  },
+
+  copyToMediaStore(fileDescriptor: FileDescriptor, mediatype: MediaCollections, path: string): Promise<string> {
+    return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, normalizeFilePath(path));
+  },
+
+  queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult> {
+    return RNFSMediaStoreManager.query(searchOptions);
+  },
+
+  deleteFromMediaStore(uri: string): Promise<boolean> {
+    return RNFSMediaStoreManager.delete(uri);
+  },
+
+  MEDIA_AUDIO: 'Audio' as MediaCollections,
+  MEDIA_IMAGE: 'Image' as MediaCollections,
+  MEDIA_VIDEO: 'Video' as MediaCollections,
+  MEDIA_DOWNLOAD: 'Download' as MediaCollections,
+};
 
 export default {
   mkdir(filepath: string, options: MkdirOptions = {}): Promise<undefined> {
@@ -315,6 +359,8 @@ export default {
   scanFile(path: string): Promise<string[]> {
     return RNFSManager.scanFile(path);
   },
+
+  MediaStore,
 
   MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
   CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,

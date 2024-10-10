@@ -18,6 +18,7 @@ import {getTestFolder, requestAndroidPermission} from './utils';
  */
 import Example1 from './example1';
 import Example2 from './example2';
+import Example3 from './example3';
 
 const App = () => {
   // methods
@@ -52,18 +53,27 @@ const App = () => {
           <View style={styles.topBar}>
             <View>
               <Text style={styles.title}>Examples</Text>
-              <Text style={styles.subTitle}>Run the examples below directly to your device or simulators</Text>
             </View>
 
-            <Pressable
-              style={({pressed}) => (!pressed ? styles.clearButton : styles.clearButtonPressed)}
-              onPress={cleanExampleFilesAndFolders}>
-              <Text style={styles.clearButtonText}>Clean Example Folders/Files</Text>
-            </Pressable>
+            <View>
+              <Pressable
+                style={({pressed}) => (!pressed ? styles.clearButton : styles.clearButtonPressed)}
+                onPress={cleanExampleFilesAndFolders}>
+                <Text style={styles.clearButtonText}>Clean Example Folders/Files</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.topBar}>
+            <View>
+              <Text style={styles.subTitle}>Run the examples below directly to your device or simulators</Text>
+            </View>
           </View>
 
           <Example1 />
           <Example2 />
+
+          {Platform.OS === 'android' && <Example3 />}
         </View>
       </ScrollView>
     </SafeAreaView>

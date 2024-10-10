@@ -79,6 +79,24 @@ export type FSInfoResult = {
   freeSpace: number; // The amount of available storage space on the device (in bytes).
 };
 
+export type FileDescriptor = {
+  name: string;
+  parentFolder: string;
+  mimeType: string;
+};
+
+export type MediaStoreSearchOptions = {
+  uri: string;
+  fileName: string;
+  relativePath: string;
+  mediaType: MediaCollections;
+};
+
+export type MediaStoreQueryResult = {
+  contentUri: string;
+};
+
 export type Encoding = 'utf8' | 'base64' | 'ascii' | 'arraybuffer';
 export type EncodingOrOptions = Encoding | Record<string, any>;
 export type ProcessedOptions = Record<string, any | Encoding>;
+export type MediaCollections = 'Audio' | 'Image' | 'Video' | 'Download';

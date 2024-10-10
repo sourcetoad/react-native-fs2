@@ -15,7 +15,10 @@ public class RNFSPackage implements ReactPackage {
   @NonNull
   @Override
   public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
-    return Arrays.<NativeModule>asList(new RNFSManager(reactContext));
+    return Arrays.<NativeModule>asList(
+      new RNFSManager(reactContext),
+      new RNFSMediaStoreManager(reactContext)
+    );
   }
 
   @NonNull
