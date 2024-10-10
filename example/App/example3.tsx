@@ -24,7 +24,7 @@ const Example = () => {
       // Check if file already exist on MediaStore
       const contentExists = await RNFS.MediaStore.queryMediaStore({
         uri: '',
-        fileName: imageFileName,
+        fileName: `${prefix}${imageFileName}`,
         relativePath: folderName,
         mediaType: RNFS.MediaStore.MEDIA_IMAGE,
       });
@@ -36,7 +36,7 @@ const Example = () => {
           await RNFS.MediaStore.writeToMediaFile(contentExists.contentUri, imagePath);
         }
 
-        return imagePath;
+        return contentExists.contentUri;
       }
 
       const contentURI = await RNFS.MediaStore.copyToMediaStore(
