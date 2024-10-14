@@ -315,6 +315,19 @@ const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 
 const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE)
 ```
 
+### `updateMediaFile`
+
+* Updates the media file in the MediaStore
+
+```ts
+// updateMediaFile(uri: string, fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
+
+const contentURI = 'content://media/external/images/media/123'
+const fileDescriptor = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+
+const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescriptor, RNFS.MediaStore.MEDIA_IMAGE)
+```
+
 ### `writeToMediaFile`
 
 * Writes data to a media file in the MediaStore with the given `mimeType`.
@@ -337,14 +350,27 @@ const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 
 const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
 ```
 
-### `existsInMediaStore`
+### `queryMediaStore`
 
-* Checks if the media file at `uri` exists in the MediaStore.
+* Queries the MediaStore for media files with the given `searchOptions`.
 
 ```ts
-// existsInMediaStore(uri: string): Promise<boolean>
+// queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult>
 
-await RNFS.MediaStore.existsInMediaStore('content://media/external/images/media/123')
+await RNFS.MediaStore.queryMediaStore({
+  uri: 'content://media/external/images/media/123',
+  fileName: ''
+  relativePath: ''
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+})
+
+// or
+await RNFS.MediaStore.queryMediaStore({
+  uri: '',
+  fileName: 'image.png'
+  relativePath: 'MyAppFolder'
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+})
 ```
 
 ### `deleteFromMediaStore`
@@ -363,6 +389,23 @@ type FileDescriptor = {
   name: string; 
   parentFolder: string; 
   mimeType: string 
+};
+```
+
+## MediaStoreSearchOptions
+```ts
+type MediaStoreSearchOptions = { 
+  uri: string; 
+  fileName: string; 
+  relativePath: string; 
+  mediaType: MediaCollections 
+};
+```
+
+## MediaStoreQueryResult
+```ts
+type MediaStoreQueryResult = { 
+  contentUri: string;
 };
 ```
 
