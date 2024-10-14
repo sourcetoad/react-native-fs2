@@ -60,6 +60,7 @@ GEM
     escape (0.0.4)
     ethon (0.16.0)
       ffi (>= 1.15.0)
+    ffi (1.17.0)
     ffi (1.17.0-arm64-darwin)
     ffi (1.17.0-x86_64-linux)
     fourflusher (2.3.1)
@@ -94,6 +95,7 @@ GEM
 
 PLATFORMS
   arm64-darwin-22
+  ruby
   x86_64-linux
 
 DEPENDENCIES
