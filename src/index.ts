@@ -132,6 +132,10 @@ const MediaStore = {
     return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
   },
 
+  updateMediaFile(uri: string, fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string> {
+    return RNFSMediaStoreManager.updateMediaFile(uri, fileDescriptor, mediatype);
+  },
+
   writeToMediaFile(uri: string, path: string): Promise<void> {
     return RNFSMediaStoreManager.writeToMediaFile(uri, normalizeFilePath(path), false);
   },

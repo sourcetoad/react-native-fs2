@@ -151,6 +151,16 @@ const Example = () => {
 
       runStatus = `${runStatus}\n- "Media File" stat: ${JSON.stringify(mediaStat)}`;
       setResult(runStatus);
+
+      await RNFS.MediaStore.updateMediaFile(
+        contentURI,
+        {
+          name: `pewpewDummyImageEdited.png`,
+          parentFolder: 'RNFSExample3Folder',
+          mimeType: 'image/png',
+        },
+        RNFS.MediaStore.MEDIA_IMAGE,
+      );
     } catch (err) {
       setResult(`${runStatus}\n- Error Running Example`);
       console.error(err);

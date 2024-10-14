@@ -139,6 +139,25 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
+  @ReactMethod void updateMediaFile(String fileUri, ReadableMap filedata, String mediaType, Promise promise) {
+    if (!(filedata.hasKey("name") && filedata.hasKey("parentFolder") && filedata.hasKey("mimeType"))) {
+      promise.reject("RNFS2.updateMediaFile", "Invalid filedata: " + filedata.toString());
+      return;
+    }
+
+    if (mediaType == null) {
+      promise.reject("RNFS2.updateMediaFile", "Invalid mediatype");
+      return;
+    }
+
+    FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
+    Uri fileuri = Uri.parse(fileUri);
+    boolean res = updateExistingMediaFile(fileuri, file, MediaType.valueOf(mediaType), promise, reactContext);
+    if (res) {
+      promise.resolve("Success");
+    }
+  }
+
   @ReactMethod
   public void writeToMediaFile(String fileUri, String path, boolean transformFile, Promise promise) {
     boolean res = writeToMediaFile(Uri.parse(fileUri), path, transformFile, promise, reactContext);
@@ -247,6 +266,33 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
 
     return null;
+  }
+
+  private boolean updateExistingMediaFile(Uri fileUri, FileDescription file, MediaType mediaType, Promise promise, ReactApplicationContext ctx) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      try {
+        Context appCtx = ctx.getApplicationContext();
+        ContentResolver resolver = appCtx.getContentResolver();
+
+        ContentValues fileDetails = new ContentValues();
+        String relativePath = getRelativePath(mediaType, ctx);
+        String mimeType = file.mimeType;
+
+        fileDetails.put(MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000);
+        fileDetails.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+        fileDetails.put(MediaStore.MediaColumns.DISPLAY_NAME, file.name);
+        fileDetails.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath + '/' + file.parentFolder);
+
+        int rowsUpdated = resolver.update(fileUri, fileDetails, null, null);
+        return rowsUpdated > 0;
+      } catch (Exception e) {
+        promise.reject("RNFS2.updateExistingMediaFile", "Error updating file: " + e.getMessage());
+        return false;
+      }
+    } else {
+      promise.reject("RNFS2.updateExistingMediaFile", "Android version not supported");
+      return false;
+    }
   }
 
   private boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
