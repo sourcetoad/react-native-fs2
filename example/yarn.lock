@@ -5410,7 +5410,7 @@ react-native-blob-jsi-helper@^0.3.1:
   integrity sha512-/stY23PFePcJMwQsnnySLC4aNWiJnje0i/9tQFK6JCFOE8QclgWvCvUITS5Im0SO8mR3VzDLwAhbppWBjYWpLA==
 
 "react-native-fs2@file:..":
-  version "3.2.1"
+  version "3.3.2"
   dependencies:
     base-64 "^1.0.0"
     utf8 "^3.0.0"

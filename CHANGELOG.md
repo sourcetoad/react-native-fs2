@@ -1,5 +1,15 @@
 # Changelog
 
+# v3.3.2 (November 15, 2024)
+ * Fix peering for greater than RN74
+
+# v3.3.1 (October 14, 2024)
+ * [#70](https://github.com/sourcetoad/react-native-fs2/pull/70) - Support for update media file.
+
+# v3.3.0 (October 14, 2024)
+ * [#68](https://github.com/sourcetoad/react-native-fs2/pull/68) - Media file support.
+ * Automatic updates via Dependabot
+
 # v3.2.1 (July 16, 2024)
  * [#52](https://github.com/sourcetoad/react-native-fs2/pull/54) - Support RN74
  * Automatic updates via Dependabot
