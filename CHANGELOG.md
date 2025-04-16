@@ -1,5 +1,8 @@
 # Changelog
 
+# v3.3.3 (April 16, 2025)
+ * [#82](https://github.com/sourcetoad/react-native-fs2/pull/82) - Move to `try-with-resources` to close streams.
+
 # v3.3.2 (November 15, 2024)
  * Fix peering for greater than RN74
 
