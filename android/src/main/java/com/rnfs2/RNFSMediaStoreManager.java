@@ -283,10 +283,21 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         fileDetails.put(MediaStore.MediaColumns.DISPLAY_NAME, file.name);
         fileDetails.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath + '/' + file.parentFolder);
 
-        int rowsUpdated = resolver.update(fileUri, fileDetails, null, null);
+        int rowsUpdated = 0;
+        try {
+          rowsUpdated = resolver.update(fileUri, fileDetails, null, null);
+        } catch (SecurityException securityException) {
+          if (securityException instanceof RecoverableSecurityException) {
+            promise.reject("ERR_RECOVERABLE_SECURITY", "App needs user permission to modify this file." + securityException.getMessage());
+          } else {
+            promise.reject("ERR_SECURITY_EXCEPTION", "SecurityException occurred during update: " + securityException.getMessage());
+          }
+
+          return false;
+        }
         return rowsUpdated > 0;
       } catch (Exception e) {
-        promise.reject("RNFS2.updateExistingMediaFile", "Error updating file: " + e.getMessage());
+        promise.reject("RNFS2.updateExistingMediaFile", "Error updating file: " + e.getMessage(), e);
         return false;
       }
     } else {
