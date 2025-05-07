@@ -1,5 +1,6 @@
 package com.rnfs2;
 
+import android.app.RecoverableSecurityException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
