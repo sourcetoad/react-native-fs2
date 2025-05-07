@@ -184,29 +184,59 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       return;
     }
 
-    // check if file at path exists first before proceeding on creating the media file
     try {
-      File file = new File(path);
-      if (!file.exists()) {
+      File srcFile = new File(path);
+      if (!srcFile.exists()) {
         promise.reject("RNFS2.copyToMediaStore", "No such file ('" + path + "')");
         return;
       }
     } catch (Exception e) {
-      promise.reject("RNFS2.copyToMediaStore", "Error opening file: " + e.getMessage());
+      promise.reject("RNFS2.copyToMediaStore", "Error accessing source file: " + e.getMessage(), e);
       return;
     }
 
-    FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
-    Uri fileuri = createNewMediaFile(file, MediaType.valueOf(mediaType), promise, reactContext);
+    ContentResolver resolver = reactContext.getContentResolver();
+    Uri fileUri = null;
 
-    if (fileuri == null) {
-      promise.reject("RNFS2.copyToMediaStore", "File could not be created");
-      return;
-    }
+    try {
+      FileDescription fileDesc = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
+      
+      fileUri = createNewMediaFile(fileDesc, MediaType.valueOf(mediaType), promise, reactContext);
 
-    boolean res = writeToMediaFile(fileuri, path, false, true, promise, reactContext);
-    if (res) {
-      promise.resolve(fileuri.toString());
+      if (fileUri == null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { 
+             promise.reject("RNFS2.copyToMediaStore", "Failed to create initial media file entry (null URI from createNewMediaFile on Q+).");
+        }
+        return; 
+      }
+
+      ContentValues pendingValues = new ContentValues();
+      pendingValues.put(MediaStore.MediaColumns.IS_PENDING, 1);
+      if (resolver.update(fileUri, pendingValues, null, null) == 0) {
+        cleanupMediaStoreEntry(fileUri, resolver);
+        promise.reject("RNFS2.copyToMediaStore", "Failed to mark media file as pending (0 rows updated). Original entry cleaned up.");
+        return; 
+      }
+
+      boolean writeSuccessful = writeToMediaFile(fileUri, path, false, true, promise, reactContext);
+
+      if (writeSuccessful) {
+        ContentValues commitValues = new ContentValues();
+        commitValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        if (resolver.update(fileUri, commitValues, null, null) > 0) {
+          promise.resolve(fileUri.toString()); 
+        } else {
+          cleanupMediaStoreEntry(fileUri, resolver);
+          promise.reject("RNFS2.copyToMediaStore", "Failed to commit media file (unmark as pending - 0 rows updated). Entry with data cleaned up.");
+        }
+      }
+      // If writeSuccessful is false, writeToMediaFile has already rejected and handled cleanup.
+
+    } catch (Exception e) { 
+      if (fileUri != null) {
+        cleanupMediaStoreEntry(fileUri, resolver);
+      }
+      promise.reject("RNFS2.copyToMediaStore", "Unexpected error during copyToMediaStore: " + e.getMessage(), e);
     }
   }
 
