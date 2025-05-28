@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
+import android.os.FileUtils;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
@@ -380,11 +381,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
             byte[] transformedBytes = RNFSFileTransformer.sharedFileTransformer.onWriteFile(bytes);
             out.write(transformedBytes);
           } else {
-            byte[] buf = new byte[1024 * 10];
-            int read;
-            while ((read = fin.read(buf)) > 0) {
-              out.write(buf, 0, read);
-            }
+            FileUtils.copy(fin, out);
           }
         }
 
