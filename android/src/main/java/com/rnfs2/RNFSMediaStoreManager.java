@@ -1,5 +1,6 @@
 package com.rnfs2;
 
+import android.app.RecoverableSecurityException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -9,6 +10,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
+import android.os.FileUtils;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
@@ -160,7 +162,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void writeToMediaFile(String fileUri, String path, boolean transformFile, Promise promise) {
-    boolean res = writeToMediaFile(Uri.parse(fileUri), path, transformFile, promise, reactContext);
+    boolean res = writeToMediaFile(Uri.parse(fileUri), path, transformFile, false, promise, reactContext);
     if (res) {
       promise.resolve("Success");
     }
@@ -183,29 +185,59 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       return;
     }
 
-    // check if file at path exists first before proceeding on creating the media file
     try {
-      File file = new File(path);
-      if (!file.exists()) {
+      File srcFile = new File(path);
+      if (!srcFile.exists()) {
         promise.reject("RNFS2.copyToMediaStore", "No such file ('" + path + "')");
         return;
       }
     } catch (Exception e) {
-      promise.reject("RNFS2.copyToMediaStore", "Error opening file: " + e.getMessage());
+      promise.reject("RNFS2.copyToMediaStore", "Error accessing source file: " + e.getMessage(), e);
       return;
     }
 
-    FileDescription file = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
-    Uri fileuri = createNewMediaFile(file, MediaType.valueOf(mediaType), promise, reactContext);
+    ContentResolver resolver = reactContext.getContentResolver();
+    Uri fileUri = null;
 
-    if (fileuri == null) {
-      promise.reject("RNFS2.copyToMediaStore", "File could not be created");
-      return;
-    }
+    try {
+      FileDescription fileDesc = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
+      
+      fileUri = createNewMediaFile(fileDesc, MediaType.valueOf(mediaType), promise, reactContext);
 
-    boolean res = writeToMediaFile(fileuri, path, false, promise, reactContext);
-    if (res) {
-      promise.resolve(fileuri.toString());
+      if (fileUri == null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { 
+             promise.reject("RNFS2.copyToMediaStore", "Failed to create initial media file entry (null URI from createNewMediaFile on Q+).");
+        }
+        return; 
+      }
+
+      ContentValues pendingValues = new ContentValues();
+      pendingValues.put(MediaStore.MediaColumns.IS_PENDING, 1);
+      if (resolver.update(fileUri, pendingValues, null, null) == 0) {
+        cleanupMediaStoreEntry(fileUri, resolver);
+        promise.reject("RNFS2.copyToMediaStore", "Failed to mark media file as pending (0 rows updated). Original entry cleaned up.");
+        return; 
+      }
+
+      boolean writeSuccessful = writeToMediaFile(fileUri, path, false, true, promise, reactContext);
+
+      if (writeSuccessful) {
+        ContentValues commitValues = new ContentValues();
+        commitValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        if (resolver.update(fileUri, commitValues, null, null) > 0) {
+          promise.resolve(fileUri.toString()); 
+        } else {
+          cleanupMediaStoreEntry(fileUri, resolver);
+          promise.reject("RNFS2.copyToMediaStore", "Failed to commit media file (unmark as pending - 0 rows updated). Entry with data cleaned up.");
+        }
+      }
+      // If writeSuccessful is false, writeToMediaFile has already rejected and handled cleanup.
+
+    } catch (Exception e) { 
+      if (fileUri != null) {
+        cleanupMediaStoreEntry(fileUri, resolver);
+      }
+      promise.reject("RNFS2.copyToMediaStore", "Unexpected error during copyToMediaStore: " + e.getMessage(), e);
     }
   }
 
@@ -283,10 +315,21 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         fileDetails.put(MediaStore.MediaColumns.DISPLAY_NAME, file.name);
         fileDetails.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath + '/' + file.parentFolder);
 
-        int rowsUpdated = resolver.update(fileUri, fileDetails, null, null);
+        int rowsUpdated = 0;
+        try {
+          rowsUpdated = resolver.update(fileUri, fileDetails, null, null);
+        } catch (SecurityException securityException) {
+          if (securityException instanceof RecoverableSecurityException) {
+            promise.reject("ERR_RECOVERABLE_SECURITY", "App needs user permission to modify this file." + securityException.getMessage());
+          } else {
+            promise.reject("ERR_SECURITY_EXCEPTION", "SecurityException occurred during update: " + securityException.getMessage());
+          }
+
+          return false;
+        }
         return rowsUpdated > 0;
       } catch (Exception e) {
-        promise.reject("RNFS2.updateExistingMediaFile", "Error updating file: " + e.getMessage());
+        promise.reject("RNFS2.updateExistingMediaFile", "Error updating file: " + e.getMessage(), e);
         return false;
       }
     } else {
@@ -295,84 +338,78 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
-  private boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, Promise promise, ReactApplicationContext ctx) {
+  private void cleanupMediaStoreEntry(Uri fileUri, ContentResolver resolver) {
+    try {
+      resolver.delete(fileUri, null, null);
+    } catch (Exception deleteError) {
+      Log.e("RNFS2", "Failed to cleanup MediaStore entry: " + deleteError.getMessage());
+    }
+  }
+
+  private boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, boolean shouldCleanupOnFailure, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      Context appCtx = ctx.getApplicationContext();
+      ContentResolver resolver = appCtx.getContentResolver();
+      OutputStream stream = null;
+
       try {
-        Context appCtx = ctx.getApplicationContext();
-        ContentResolver resolver = appCtx.getContentResolver();
-
-        // write data
-        OutputStream stream = null;
-        Uri uri = null;
-
-        try {
-          ParcelFileDescriptor descr;
-          try {
-            assert fileUri != null;
-            descr = appCtx.getContentResolver().openFileDescriptor(fileUri, "w");
-            assert descr != null;
-
-            File src = new File(filePath);
-
-            if (!src.exists()) {
-              promise.reject("ENOENT", "No such file ('" + filePath + "')");
-              return false;
-            }
-
-            FileInputStream fin = new FileInputStream(src);
-            FileOutputStream out = new FileOutputStream(descr.getFileDescriptor());
-
-            if (transformFile) {
-              // in order to transform file, we must load the entire file onto memory
-              int length = (int) src.length();
-              byte[] bytes = new byte[length];
-              fin.read(bytes);
-              if (RNFSFileTransformer.sharedFileTransformer == null) {
-                throw new IllegalStateException("Write to media file with transform was specified but the shared file transformer is not set");
-              }
-              byte[] transformedBytes = RNFSFileTransformer.sharedFileTransformer.onWriteFile(bytes);
-              out.write(transformedBytes);
-            } else  {
-              byte[] buf = new byte[1024 * 10];
-              int read;
-
-              while ((read = fin.read(buf)) > 0) {
-                out.write(buf, 0, read);
-              }
-            }
-
-            fin.close();
-            out.close();
-            descr.close();
-          } catch (Exception e) {
-            e.printStackTrace();
-            promise.reject(new IOException("Failed to get output stream."));
-            return false;
-          }
-
-          stream = resolver.openOutputStream(fileUri);
-          if (stream == null) {
-            promise.reject(new IOException("Failed to get output stream."));
-            return false;
-          }
-        } catch (IOException e) {
-          // Don't leave an orphan entry in the MediaStore
-          resolver.delete(uri, null, null);
-          promise.reject(e);
+        if (fileUri == null) {
+          promise.reject("RNFS2.createMediaFile", "Invalid file URI");
           return false;
-        } finally {
-          if (stream != null) {
-            stream.close();
+        }
+
+        File src = new File(filePath);
+        if (!src.exists()) {
+          promise.reject("ENOENT", "No such file ('" + filePath + "')");
+          return false;
+        }
+
+        ParcelFileDescriptor descr = appCtx.getContentResolver().openFileDescriptor(fileUri, "w");
+        if (descr == null) {
+          promise.reject("RNFS2.createMediaFile", "Failed to open file descriptor");
+          return false;
+        }
+
+        try (descr; FileInputStream fin = new FileInputStream(src); FileOutputStream out = new FileOutputStream(descr.getFileDescriptor())) {
+          if (transformFile) {
+            int length = (int) src.length();
+            byte[] bytes = new byte[length];
+            fin.read(bytes);
+            if (RNFSFileTransformer.sharedFileTransformer == null) {
+              throw new IllegalStateException("Write to media file with transform was specified but the shared file transformer is not set");
+            }
+            byte[] transformedBytes = RNFSFileTransformer.sharedFileTransformer.onWriteFile(bytes);
+            out.write(transformedBytes);
+          } else {
+            FileUtils.copy(fin, out);
           }
         }
-      } catch (IOException e) {
-        promise.reject("RNFS2.createMediaFile", "Cannot write to file, file might not exist");
+
+        stream = resolver.openOutputStream(fileUri);
+
+        if (stream == null) {
+          promise.reject(new IOException("Failed to get output stream."));
+          return false;
+        }
+      } catch (Exception e) {
+        if (shouldCleanupOnFailure) {
+          cleanupMediaStoreEntry(fileUri, resolver);
+        }
+        
+        promise.reject("RNFS2.createMediaFile", "Failed to write file: " + e.getMessage());
         return false;
+      } finally {
+        if (stream != null) {
+          try {
+            stream.close();
+          } catch (IOException e) {
+            Log.e("RNFS2", "Failed to close output stream: " + e.getMessage());
+          }
+        }
       }
 
       return true;
     } else {
-      // throw error not supported
       promise.reject("RNFS2.createMediaFile", "Android version not supported");
       return false;
     }
