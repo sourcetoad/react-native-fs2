@@ -7,7 +7,6 @@ protocol DownloaderDelegate: AnyObject {
   func downloadDidProgress(jobId: Int, contentLength: Int64, bytesWritten: Int64)
   func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64)
   func downloadDidError(jobId: Int, error: Error)
-  func downloadIsResumable(jobId: Int, resumable: Bool)
   func downloadCanBeResumed(jobId: Int)
 }
 
