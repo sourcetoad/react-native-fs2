@@ -30,6 +30,7 @@ class Fs2: HybridFs2Spec {
     var progressListeners: [DownloadListenerWrapper] = []
     var completeListeners: [DownloadListenerWrapper] = []
     var errorListeners: [DownloadListenerWrapper] = []
+    var canBeResumedListeners: [DownloadListenerWrapper] = []
   }
   
   // Store DownloadCallbacksHolder per jobId
@@ -732,6 +733,18 @@ class Fs2: HybridFs2Spec {
     }
   }
 
+  func listenToDownloadCanBeResumed(onDownloadCanBeResumed: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    guard let onDownloadCanBeResumed = onDownloadCanBeResumed else { return {} }
+    let wrapper = DownloadListenerWrapper(onDownloadCanBeResumed)
+    downloadListeners.canBeResumedListeners.append(wrapper)
+    return { [weak self, weak wrapper] in
+      guard let self = self, let wrapper = wrapper else { return }
+      if let idx = self.downloadListeners.canBeResumedListeners.firstIndex(where: { $0 === wrapper }) {
+        self.downloadListeners.canBeResumedListeners.remove(at: idx)
+      }
+    }
+  }
+
   // misc
   func scanFile(path: String) -> Promise<[String]> {
     return Promise<[String]>.async {
@@ -820,7 +833,15 @@ extension Fs2: DownloaderDelegate {
     }
   }
 
-  func downloadIsResumable(jobId: Int, resumable: Bool) {
-    // TODO: Bridge to Nitro/JS event/callback
+  func downloadCanBeResumed(jobId: Int) {
+    let event = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: nil,
+      contentLength: nil,
+      statusCode: nil,
+      bytesWritten: nil,
+      error: nil
+    )
+    for wrapper in self.downloadListeners.canBeResumedListeners { wrapper.callback(event) }
   }
 }

@@ -8,6 +8,7 @@ protocol DownloaderDelegate: AnyObject {
   func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64)
   func downloadDidError(jobId: Int, error: Error)
   func downloadIsResumable(jobId: Int, resumable: Bool)
+  func downloadCanBeResumed(jobId: Int)
 }
 
 class Downloader: NSObject, URLSessionDownloadDelegate {
@@ -226,6 +227,7 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
       if let resumeData = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
         self.resumeData = resumeData
         delegate?.downloadIsResumable(jobId: jobId, resumable: true)
+        delegate?.downloadCanBeResumed(jobId: jobId)
       } else {
         delegate?.downloadDidError(jobId: jobId, error: error)
       }

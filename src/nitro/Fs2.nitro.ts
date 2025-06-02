@@ -137,6 +137,14 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
     onDownloadError?: (event: DownloadEventResult) => void
   ): () => void;
 
+  /**
+   * iOS only: Called when a download becomes resumable (can be resumed, e.g. after pause/interruption). No-op on Android.
+   * Returns an unsubscribe function.
+   */
+  listenToDownloadCanBeResumed(
+    onDownloadCanBeResumed?: (event: DownloadEventResult) => void
+  ): () => void;
+
   // Android Specific Functionality
   getAllExternalFilesDirs(): Promise<string[]>; // Android only
   scanFile(path: string): Promise<string[]>; // Android only (Triggers Media Scanner)
