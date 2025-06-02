@@ -103,6 +103,7 @@ const downloadListeners = {
   progress: new Map<number, (event: DownloadEventResult) => void>(),
   complete: new Map<number, (event: DownloadEventResult) => void>(),
   error: new Map<number, (event: DownloadEventResult) => void>(),
+  canBeResumed: new Map<number, (event: DownloadEventResult) => void>(),
 };
 
 RNFS2Nitro.listenToDownloadBegin((event) => {
@@ -122,6 +123,11 @@ RNFS2Nitro.listenToDownloadComplete((event) => {
 
 RNFS2Nitro.listenToDownloadError((event) => {
   const cb = downloadListeners.error.get(event.jobId);
+  if (cb) cb(event);
+});
+
+RNFS2Nitro.listenToDownloadCanBeResumed((event) => {
+  const cb = downloadListeners.canBeResumed.get(event.jobId);
   if (cb) cb(event);
 });
 
@@ -277,16 +283,32 @@ const compat = {
       progress?: (event: DownloadEventResult) => void;
       complete?: (event: DownloadEventResult) => void;
       error?: (event: DownloadEventResult) => void;
+      canBeResumed?: (event: DownloadEventResult) => void;
     }
   ): { jobId: number; promise: Promise<any> } {
     const jobId = getJobId();
+
     if (options.begin) downloadListeners.begin.set(jobId, options.begin);
     if (options.progress)
       downloadListeners.progress.set(jobId, options.progress);
     if (options.complete)
       downloadListeners.complete.set(jobId, options.complete);
     if (options.error) downloadListeners.error.set(jobId, options.error);
-    const nitroOptions = { ...options, jobId };
+    if (options.canBeResumed)
+      downloadListeners.canBeResumed.set(jobId, options.canBeResumed);
+
+    const nitroOptions = {
+      jobId: jobId,
+      fromUrl: options.fromUrl,
+      toFile: normalizeFilePath(options.toFile),
+      background: !!options.background,
+      progressDivider: options.progressDivider || 0,
+      progressInterval: options.progressInterval || 0,
+      readTimeout: options.readTimeout || 15000,
+      connectionTimeout: options.connectionTimeout || 5000,
+      backgroundTimeout: options.backgroundTimeout || 3600000, // 1 hour
+    };
+
     return {
       jobId,
       promise: RNFS2Nitro.downloadFile(nitroOptions),

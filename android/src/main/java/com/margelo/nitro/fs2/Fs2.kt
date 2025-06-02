@@ -439,6 +439,12 @@ class Fs2() : HybridFs2Spec() {
         return { listeners.errorListeners.remove(onDownloadError) }
     }
 
+    // iOS only: No-op on Android
+    override fun listenToDownloadCanBeResumed(onDownloadCanBeResumed: ((event: DownloadEventResult) -> Unit)?): () -> Unit {
+        // No-op, Android does not support download can-be-resumed events
+        return { }
+    }
+
     override fun getAllExternalFilesDirs(): Promise<Array<String>> {
         TODO("Not yet implemented")
     }
