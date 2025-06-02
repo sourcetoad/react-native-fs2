@@ -1,0 +1,23 @@
+{
+  "cxxNamespace": [
+    "fs2"
+  ],
+  "ios": {
+    "iosModuleName": "RNFS2"
+  },
+  "android": {
+    "androidNamespace": [
+      "fs2"
+    ],
+    "androidCxxLibName": "fs2"
+  },
+  "autolinking": {
+    "Fs2": {
+      "swift": "Fs2",
+      "kotlin": "Fs2"
+    }
+  },
+  "ignorePaths": [
+    "node_modules"
+  ]
+}
