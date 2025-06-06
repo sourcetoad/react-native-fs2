@@ -262,7 +262,7 @@ if (await RNFS.isResumable('JobID')) {
     RNFS.resumeDownload('JobID')
 }
 ```
-* Check if the the download job with this ID is resumable.
+* Check if the download job with this ID is resumable.
 
 ### `touch`
 ```ts
@@ -278,13 +278,13 @@ await RNFS.scanFile('FilePath', Date, Date)
 ```
 * Scan the file using [Media Scanner](https://developer.android.com/reference/android/media/MediaScannerConnection).
 
+----
+
 # MediaStore
+_RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore._
 
-### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore. 
-
-### Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
-
-### This feature is only available on Android targeting API 29 or higher. And may require the following permissions:
+* Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
+* This feature is only available on Android targeting API 29 or higher. And may require the following permissions:
 
 ```xml
 <!-- Required only if your app needs to access images or photos that other apps created. -->
@@ -385,26 +385,26 @@ await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/medi
 
 ## FileDescriptor
 ```ts
-type FileDescriptor = { 
-  name: string; 
-  parentFolder: string; 
-  mimeType: string 
+type FileDescriptor = {
+  name: string;
+  parentFolder: string;
+  mimeType: string
 };
 ```
 
 ## MediaStoreSearchOptions
 ```ts
-type MediaStoreSearchOptions = { 
-  uri: string; 
-  fileName: string; 
-  relativePath: string; 
-  mediaType: MediaCollections 
+type MediaStoreSearchOptions = {
+  uri: string;
+  fileName: string;
+  relativePath: string;
+  mediaType: MediaCollections
 };
 ```
 
 ## MediaStoreQueryResult
 ```ts
-type MediaStoreQueryResult = { 
+type MediaStoreQueryResult = {
   contentUri: string;
 };
 ```
