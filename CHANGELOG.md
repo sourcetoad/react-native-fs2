@@ -1,5 +1,9 @@
 # Changelog
 
+# v3.3.4 (June 6, 2025)
+ * [#85](https://github.com/sourcetoad/react-native-fs2/pull/85) - Upgrade example app to RN 79.
+ * [#84](https://github.com/sourcetoad/react-native-fs2/pull/84) - MediaStore improvements with IS_PENDING flag for Android 29+.
+
 # v3.3.3 (April 16, 2025)
  * [#82](https://github.com/sourcetoad/react-native-fs2/pull/82) - Move to `try-with-resources` to close streams.
 
