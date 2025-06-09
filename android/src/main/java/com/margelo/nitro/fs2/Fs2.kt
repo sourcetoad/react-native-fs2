@@ -1,6 +1,5 @@
 package com.margelo.nitro.fs2
 
-import android.util.Log
 import com.facebook.proguard.annotations.DoNotStrip
 import com.facebook.react.bridge.ReadableMap
 import com.margelo.nitro.NitroModules
@@ -56,7 +55,7 @@ class Fs2() : HybridFs2Spec() {
                 rnfsManager.mkdir(filepath, options)
                 return@async
             } catch (e: Exception) {
-                reject(filepath, e)
+                throw reject(filepath, e)
             }
         }
     }
@@ -82,7 +81,8 @@ class Fs2() : HybridFs2Spec() {
                 // - Source existence check (throws ENOENT if not found after path/URI resolution)
                 // - Source is directory check (throws EISDIR if source is a directory)
                 // - Content URI resolution for both source and destination paths internally
-                // - Parent directory creation for destination (if destination is a direct file path)
+                // - Parent directory creation for destination (if destination is a direct file
+                // path)
                 // - Overwriting destination if it's an existing file
                 // - Failing if destination is an existing directory (as getOutputStream would fail)
                 rnfsManager.copyFile(filepath, destPath)
@@ -128,7 +128,8 @@ class Fs2() : HybridFs2Spec() {
                                 path = stat.path,
                                 size = stat.size.toDouble(),
                                 isFile = (stat.type == RNFSManager.FILE_TYPE_REGULAR),
-                                isDirectory = (stat.type == RNFSManager.FILE_TYPE_DIRECTORY),
+                                isDirectory =
+                                    (stat.type == RNFSManager.FILE_TYPE_DIRECTORY),
                                 mtime = stat.lastModified.toDouble(),
                                 ctime = null
                             )
@@ -255,19 +256,7 @@ class Fs2() : HybridFs2Spec() {
         return Promise.async {
             try {
                 val fileStat = rnfsManager.stat(filepath)
-                val statResult =
-                    NativeStatResult(
-                        size = fileStat.size,
-                        type =
-                            if (fileStat.type == StatResultType.DIRECTORY)
-                                StatResultType.DIRECTORY
-                            else StatResultType.FILE,
-                        mtime = fileStat.mtime,
-                        ctime = fileStat.ctime,
-                        mode = null,
-                        originalFilepath = fileStat.originalFilepath
-                    )
-                return@async statResult
+                return@async fileStat
             } catch (e: Exception) {
                 throw reject(filepath, e)
             }
@@ -295,7 +284,9 @@ class Fs2() : HybridFs2Spec() {
                     val result = rnfsManager.touch(filepath, mtime.toLong(), null)
                     if (!result) {
                         // If the operation failed, throw an appropriate error
-                        throw Error("ETOUCH: Failed to set modification time for file at path: $filepath")
+                        throw Error(
+                            "ETOUCH: Failed to set modification time for file at path: $filepath"
+                        )
                     }
                 }
 
@@ -332,27 +323,28 @@ class Fs2() : HybridFs2Spec() {
         return Promise.async {
             try {
                 val currentJobId = options.jobId.toInt()
-                val params = DownloadParams().apply {
-                    this.jobId = currentJobId
-                    this.src = URL(options.fromUrl)
-                    this.dest = File(options.toFile)
-                    this.headers = headers?.toReadableMap()
+                val params =
+                    DownloadParams().apply {
+                        this.jobId = currentJobId
+                        this.src = URL(options.fromUrl)
+                        this.dest = File(options.toFile)
+                        this.headers = headers?.toReadableMap()
 
-                    // Assign callbacks directly from parameters
-                    this.onDownloadBegin = { event ->
-                        listeners.beginListeners.forEach { it?.invoke(event) }
+                        // Assign callbacks directly from parameters
+                        this.onDownloadBegin = { event ->
+                            listeners.beginListeners.forEach { it?.invoke(event) }
+                        }
+                        this.onDownloadProgress = { event ->
+                            listeners.progressListeners.forEach { it?.invoke(event) }
+                        }
+                        this.onDownloadComplete = { result ->
+                            listeners.completeListeners.forEach { it?.invoke(result) }
+                        }
+                        this.onDownloadError = { event ->
+                            listeners.errorListeners.forEach { it?.invoke(event) }
+                        }
+                        this.onCleanup = { finishedJobId -> downloaderDidFinish(finishedJobId) }
                     }
-                    this.onDownloadProgress = { event ->
-                        listeners.progressListeners.forEach { it?.invoke(event) }
-                    }
-                    this.onDownloadComplete = { result ->
-                        listeners.completeListeners.forEach { it?.invoke(result) }
-                    }
-                    this.onDownloadError = { event ->
-                        listeners.errorListeners.forEach { it?.invoke(event) }
-                    }
-                    this.onCleanup = { finishedJobId -> downloaderDidFinish(finishedJobId) }
-                }
 
                 val downloader = Downloader()
                 activeDownloaders[currentJobId] = downloader // Store the downloader instance
@@ -361,7 +353,8 @@ class Fs2() : HybridFs2Spec() {
                 return@async currentJobId.toDouble()
             } catch (e: Exception) {
                 // Handle synchronous errors during setup (e.g., invalid URL)
-                // Asynchronous errors during download will be reported via onDownloadError callback.
+                // Asynchronous errors during download will be reported via onDownloadError
+                // callback.
                 listeners.errorListeners.forEach {
                     it?.invoke(
                         DownloadEventResult(
@@ -407,7 +400,8 @@ class Fs2() : HybridFs2Spec() {
             // Option 1: Reject as not supported
             // throw Error("resumeDownload is not supported on Android")
 
-            // Option 2: No-op (as it's iOS only and this maintains consistency with the .nitro.ts comment)
+            // Option 2: No-op (as it's iOS only and this maintains consistency with the .nitro.ts
+            // comment)
             return@async // Does nothing.
         }
     }
@@ -419,30 +413,40 @@ class Fs2() : HybridFs2Spec() {
         }
     }
 
-    override fun listenToDownloadBegin(onDownloadBegin: ((event: DownloadEventResult) -> Unit)?): () -> Unit {
+    override fun listenToDownloadBegin(
+        onDownloadBegin: ((event: DownloadEventResult) -> Unit)?
+    ): () -> Unit {
         listeners.beginListeners.add(onDownloadBegin)
         return { listeners.beginListeners.remove(onDownloadBegin) }
     }
 
-    override fun listenToDownloadProgress(onDownloadProgress: ((event: DownloadEventResult) -> Unit)?): () -> Unit {
+    override fun listenToDownloadProgress(
+        onDownloadProgress: ((event: DownloadEventResult) -> Unit)?
+    ): () -> Unit {
         listeners.progressListeners.add(onDownloadProgress)
         return { listeners.progressListeners.remove(onDownloadProgress) }
     }
 
-    override fun listenToDownloadComplete(onDownloadComplete: ((result: DownloadEventResult) -> Unit)?): () -> Unit {
+    override fun listenToDownloadComplete(
+        onDownloadComplete: ((result: DownloadEventResult) -> Unit)?
+    ): () -> Unit {
         listeners.completeListeners.add(onDownloadComplete)
         return { listeners.completeListeners.remove(onDownloadComplete) }
     }
 
-    override fun listenToDownloadError(onDownloadError: ((event: DownloadEventResult) -> Unit)?): () -> Unit {
+    override fun listenToDownloadError(
+        onDownloadError: ((event: DownloadEventResult) -> Unit)?
+    ): () -> Unit {
         listeners.errorListeners.add(onDownloadError)
         return { listeners.errorListeners.remove(onDownloadError) }
     }
 
     // iOS only: No-op on Android
-    override fun listenToDownloadCanBeResumed(onDownloadCanBeResumed: ((event: DownloadEventResult) -> Unit)?): () -> Unit {
+    override fun listenToDownloadCanBeResumed(
+        onDownloadCanBeResumed: ((event: DownloadEventResult) -> Unit)?
+    ): () -> Unit {
         // No-op, Android does not support download can-be-resumed events
-        return { }
+        return {}
     }
 
     override fun getAllExternalFilesDirs(): Promise<Array<String>> {
