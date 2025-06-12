@@ -46,7 +46,7 @@ class Fs2: HybridFs2Spec {
     self.libraryDirectoryPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.path ?? ""
     self.picturesDirectoryPath = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first?.path ?? ""
     super.init()
-    downloader.delegate = self
+    self.downloader.delegate = self
   }
   
   func readFile(filepath: String) -> Promise<ArrayBufferHolder> {
@@ -76,6 +76,13 @@ class Fs2: HybridFs2Spec {
   }
   
   func writeFile(filepath: String, data: ArrayBufferHolder) -> Promise<Void> {
+    let copiedBuffer: ArrayBufferHolder
+    do {
+      copiedBuffer = try ArrayBufferHolder.copy(of: data)
+    } catch {
+      return Promise<Void>.rejected(withError: error)
+    }
+
     return Promise<Void>.async {
       let fileManager = FileManager.default
       var isDir: ObjCBool = false
@@ -97,7 +104,7 @@ class Fs2: HybridFs2Spec {
       }
       
       do {
-        let fileData = data.toData(copyIfNeeded: true) // Convert ArrayBufferHolder to Data
+        let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBufferHolder to Data
         try fileData.write(to: URL(fileURLWithPath: filepath))
         return // Return Void on success
       } catch {
@@ -432,6 +439,13 @@ class Fs2: HybridFs2Spec {
   }
   
   func appendFile(filepath: String, data: ArrayBufferHolder) -> Promise<Void> {
+    let copiedBuffer: ArrayBufferHolder
+    do {
+      copiedBuffer = try ArrayBufferHolder.copy(of: data)
+    } catch {
+      return Promise<Void>.rejected(withError: error)
+    }
+    
     return Promise<Void>.async {
       let normalizedPath = Self.normalizePath(filepath)
       let fileManager = FileManager.default
@@ -441,7 +455,7 @@ class Fs2: HybridFs2Spec {
         throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: Path is a directory, cannot append: \(normalizedPath)"])
       }
       
-      let fileData = data.toData(copyIfNeeded: true)
+      let fileData = copiedBuffer.toData(copyIfNeeded: true)
       
       if let fileHandle = FileHandle(forUpdatingAtPath: normalizedPath) {
         defer {
@@ -646,7 +660,9 @@ class Fs2: HybridFs2Spec {
           bytesWritten: nil,
           error: "Invalid URL: \(options.fromUrl)"
         )
-        for wrapper in self.downloadListeners.errorListeners { wrapper.callback(errorEvent) }
+        for wrapper in self.downloadListeners.errorListeners {
+          wrapper.callback(errorEvent)
+        }
         throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(options.fromUrl)"])
       }
       
@@ -688,7 +704,7 @@ class Fs2: HybridFs2Spec {
   func listenToDownloadBegin(onDownloadBegin: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     guard let onDownloadBegin = onDownloadBegin else { return {} }
     let wrapper = DownloadListenerWrapper(onDownloadBegin)
-    downloadListeners.beginListeners.append(wrapper)
+    self.downloadListeners.beginListeners.append(wrapper)
     return { [weak self, weak wrapper] in
       guard let self = self, let wrapper = wrapper else { return }
       if let idx = self.downloadListeners.beginListeners.firstIndex(where: { $0 === wrapper }) {
@@ -700,7 +716,7 @@ class Fs2: HybridFs2Spec {
   func listenToDownloadProgress(onDownloadProgress: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     guard let onDownloadProgress = onDownloadProgress else { return {} }
     let wrapper = DownloadListenerWrapper(onDownloadProgress)
-    downloadListeners.progressListeners.append(wrapper)
+    self.downloadListeners.progressListeners.append(wrapper)
     return { [weak self, weak wrapper] in
       guard let self = self, let wrapper = wrapper else { return }
       if let idx = self.downloadListeners.progressListeners.firstIndex(where: { $0 === wrapper }) {
@@ -712,7 +728,7 @@ class Fs2: HybridFs2Spec {
   func listenToDownloadComplete(onDownloadComplete: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     guard let onDownloadComplete = onDownloadComplete else { return {} }
     let wrapper = DownloadListenerWrapper(onDownloadComplete)
-    downloadListeners.completeListeners.append(wrapper)
+    self.downloadListeners.completeListeners.append(wrapper)
     return { [weak self, weak wrapper] in
       guard let self = self, let wrapper = wrapper else { return }
       if let idx = self.downloadListeners.completeListeners.firstIndex(where: { $0 === wrapper }) {
@@ -724,7 +740,7 @@ class Fs2: HybridFs2Spec {
   func listenToDownloadError(onDownloadError: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     guard let onDownloadError = onDownloadError else { return {} }
     let wrapper = DownloadListenerWrapper(onDownloadError)
-    downloadListeners.errorListeners.append(wrapper)
+    self.downloadListeners.errorListeners.append(wrapper)
     return { [weak self, weak wrapper] in
       guard let self = self, let wrapper = wrapper else { return }
       if let idx = self.downloadListeners.errorListeners.firstIndex(where: { $0 === wrapper }) {
@@ -736,7 +752,7 @@ class Fs2: HybridFs2Spec {
   func listenToDownloadCanBeResumed(onDownloadCanBeResumed: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     guard let onDownloadCanBeResumed = onDownloadCanBeResumed else { return {} }
     let wrapper = DownloadListenerWrapper(onDownloadCanBeResumed)
-    downloadListeners.canBeResumedListeners.append(wrapper)
+    self.downloadListeners.canBeResumedListeners.append(wrapper)
     return { [weak self, weak wrapper] in
       guard let self = self, let wrapper = wrapper else { return }
       if let idx = self.downloadListeners.canBeResumedListeners.firstIndex(where: { $0 === wrapper }) {
@@ -785,7 +801,9 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    for wrapper in self.downloadListeners.beginListeners { wrapper.callback(event) }
+    for wrapper in self.downloadListeners.beginListeners {
+      wrapper.callback(event)
+    }
   }
 
   func downloadDidProgress(jobId: Int, contentLength: Int64, bytesWritten: Int64) {
@@ -798,7 +816,9 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    for wrapper in self.downloadListeners.progressListeners { wrapper.callback(event) }
+    for wrapper in self.downloadListeners.progressListeners {
+      wrapper.callback(event)
+    }
   }
 
   func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64) {
@@ -811,7 +831,9 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    for wrapper in self.downloadListeners.completeListeners { wrapper.callback(result) }
+    for wrapper in self.downloadListeners.completeListeners {
+      wrapper.callback(result)
+    }
     // Always cleanup on complete
     self.downloaders.removeValue(forKey: jobId)
   }
@@ -826,7 +848,9 @@ extension Fs2: DownloaderDelegate {
       error: error.localizedDescription
     )
 
-    for wrapper in self.downloadListeners.errorListeners { wrapper.callback(event) }
+    for wrapper in self.downloadListeners.errorListeners {
+      wrapper.callback(event)
+    }
     // Only cleanup if not resumable
     if let downloader = self.downloaders[jobId], !downloader.isResumable() {
       self.downloaders.removeValue(forKey: jobId)
@@ -842,6 +866,8 @@ extension Fs2: DownloaderDelegate {
       bytesWritten: nil,
       error: nil
     )
-    for wrapper in self.downloadListeners.canBeResumedListeners { wrapper.callback(event) }
+    for wrapper in self.downloadListeners.canBeResumedListeners {
+      wrapper.callback(event)
+    }
   }
 }
