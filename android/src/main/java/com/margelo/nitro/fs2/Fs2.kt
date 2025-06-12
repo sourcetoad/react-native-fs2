@@ -147,7 +147,8 @@ class Fs2() : HybridFs2Spec() {
             try {
                 val fileBytes = rnfsManager.readFile(path)
                 val byteBuffer = ByteBuffer.wrap(fileBytes)
-                return@async ArrayBuffer(byteBuffer)
+
+                return@async ArrayBuffer.copy((byteBuffer))
             } catch (e: Exception) {
                 throw reject(path, e)
             }
@@ -165,7 +166,7 @@ class Fs2() : HybridFs2Spec() {
 
                 // Create and return ArrayBuffer from byte array
                 val byteBuffer = ByteBuffer.wrap(byteArray)
-                return@async ArrayBuffer(byteBuffer)
+                return@async ArrayBuffer.copy((byteBuffer))
             } catch (e: Exception) {
                 throw reject(filepath, e)
             }
@@ -173,9 +174,18 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun writeFile(path: String, data: ArrayBuffer): Promise<Unit> {
+        val copiedBuffer: ArrayBuffer
+        try {
+            // Create a copy of the ArrayBuffer to ensure we have ownership
+            copiedBuffer = ArrayBuffer.copy(data)
+        } catch (e: Exception) {
+            // If copying fails, reject immediately
+            return Promise.rejected(reject(path, e))
+        }
+
         return Promise.async {
             try {
-                val byteBuffer = data.getBuffer(copyIfNeeded = true)
+                val byteBuffer = copiedBuffer.getBuffer(copyIfNeeded = true)
                 val byteArray: ByteArray
                 if (byteBuffer.hasArray()) {
                     byteArray =
@@ -193,15 +203,24 @@ class Fs2() : HybridFs2Spec() {
                 rnfsManager.writeFile(path, byteArray)
                 return@async
             } catch (e: Exception) {
-                reject(path, e)
+                throw reject(path, e)
             }
         }
     }
 
     override fun appendFile(filepath: String, data: ArrayBuffer): Promise<Unit> {
+        val copiedBuffer: ArrayBuffer
+        try {
+            // Create a copy of the ArrayBuffer to ensure we have ownership
+            copiedBuffer = ArrayBuffer.copy(data)
+        } catch (e: Exception) {
+            // If copying fails, reject immediately
+            return Promise.rejected(reject(filepath, e))
+        }
+
         return Promise.async {
             try {
-                val byteBuffer = data.getBuffer(copyIfNeeded = true)
+                val byteBuffer = copiedBuffer.getBuffer(copyIfNeeded = true)
                 val byteArray: ByteArray
                 if (byteBuffer.hasArray()) {
                     byteArray =
@@ -225,10 +244,18 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun write(filepath: String, data: ArrayBuffer, position: Double?): Promise<Unit> {
+        val copiedBuffer: ArrayBuffer
+        try {
+            // Create a copy of the ArrayBuffer to ensure we have ownership
+            copiedBuffer = ArrayBuffer.copy(data)
+        } catch (e: Exception) {
+            // If copying fails, reject immediately
+            return Promise.rejected(reject(filepath, e))
+        }
+
         return Promise.async {
             try {
-                // Get byte array from ArrayBuffer
-                val byteBuffer = data.getBuffer(copyIfNeeded = true)
+                val byteBuffer = copiedBuffer.getBuffer(copyIfNeeded = true)
                 val byteArray: ByteArray
                 if (byteBuffer.hasArray()) {
                     byteArray =
@@ -328,7 +355,7 @@ class Fs2() : HybridFs2Spec() {
                         this.jobId = currentJobId
                         this.src = URL(options.fromUrl)
                         this.dest = File(options.toFile)
-                        this.headers = headers?.toReadableMap()
+                        this.headers = convertHeadersToReadableMap(headers)
 
                         // Assign callbacks directly from parameters
                         this.onDownloadBegin = { event ->
@@ -450,11 +477,11 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun getAllExternalFilesDirs(): Promise<Array<String>> {
-        TODO("Not yet implemented")
+        return Promise.async { throw Error("getAllExternalFilesDirs is not supported") }
     }
 
     override fun scanFile(path: String): Promise<Array<String>> {
-        TODO("Not yet implemented")
+        return Promise.async { throw Error("scanFile is not supported") }
     }
 
     // Private methods
@@ -470,13 +497,14 @@ class Fs2() : HybridFs2Spec() {
         throw Error(ex.message)
     }
 
-    // Extension function to convert Map<String, String> to ReadableMap (simplified)
-    // A more robust implementation might be needed depending on actual ReadableMap requirements.
-    private fun Map<String, String>.toReadableMap(): ReadableMap {
-        val writableMap = com.facebook.react.bridge.Arguments.createMap()
-        for ((key, value) in this) {
-            writableMap.putString(key, value)
+    // Convert Map<String, String> to ReadableMap for React Native bridge
+    private fun convertHeadersToReadableMap(headers: Map<String, String>?): ReadableMap? {
+        return headers?.let { headerMap ->
+            val writableMap = com.facebook.react.bridge.Arguments.createMap()
+            for ((key, value) in headerMap) {
+                writableMap.putString(key, value)
+            }
+            writableMap
         }
-        return writableMap
     }
 }

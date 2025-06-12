@@ -10,7 +10,7 @@ import type {
   NativeStatResult,
   HashAlgorithm,
 } from './nitro/Fs2.nitro';
-import type { StatResult } from './types';
+import type { Encoding, EncodingOrOptions, StatResult } from './types';
 
 // --- Re-export types ---
 export type {
@@ -31,13 +31,12 @@ export type {
   SortByType,
 } from './nitro/MediaStore.nitro';
 
+// --- Encoding helpers ---
+import { encodeContents, decodeContents } from './utils';
+
 // --- Path normalization ---
 const normalizeFilePath = (path: string): string =>
   path.startsWith('file://') ? path.slice(7) : path;
-
-// --- Encoding helpers ---
-type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
-type EncodingOrOptions = Encoding | { encoding?: Encoding };
 
 function parseOptions(encodingOrOptions?: EncodingOrOptions): {
   encoding: Encoding;
@@ -50,43 +49,6 @@ function parseOptions(encodingOrOptions?: EncodingOrOptions): {
     options = { ...options, ...encodingOrOptions };
   }
   return options;
-}
-
-function encodeContents(
-  contents: string,
-  encoding: Encoding
-): ArrayBuffer | string {
-  if (encoding === 'utf8') {
-    return new Uint8Array(Buffer.from(contents, 'utf8')).buffer;
-  }
-  if (encoding === 'ascii') {
-    return new Uint8Array(Buffer.from(contents, 'ascii')).buffer;
-  }
-  if (encoding === 'base64') {
-    return Buffer.from(contents, 'base64').buffer;
-  }
-  if (encoding === 'arraybuffer') {
-    return contents as unknown as ArrayBuffer;
-  }
-  throw new Error('Invalid encoding type "' + String(encoding) + '"');
-}
-
-function decodeContents(
-  buffer: ArrayBuffer,
-  encoding: Encoding
-): string | ArrayBuffer {
-  if (encoding === 'arraybuffer') return buffer;
-  const buf = Buffer.from(buffer);
-  if (encoding === 'utf8') {
-    return buf.toString('utf8');
-  }
-  if (encoding === 'ascii') {
-    return buf.toString('ascii');
-  }
-  if (encoding === 'base64') {
-    return buf.toString('base64');
-  }
-  throw new Error('Invalid encoding type "' + String(encoding) + '"');
 }
 
 // --- Nitro Hybrid Objects ---
@@ -106,30 +68,30 @@ const downloadListeners = {
   canBeResumed: new Map<number, (event: DownloadEventResult) => void>(),
 };
 
-RNFS2Nitro.listenToDownloadBegin((event) => {
-  const cb = downloadListeners.begin.get(event.jobId);
-  if (cb) cb(event);
-});
+// RNFS2Nitro.listenToDownloadBegin((event) => {
+//   const cb = downloadListeners.begin.get(event.jobId);
+//   if (cb) cb(event);
+// });
 
-RNFS2Nitro.listenToDownloadProgress((event) => {
-  const cb = downloadListeners.progress.get(event.jobId);
-  if (cb) cb(event);
-});
+// RNFS2Nitro.listenToDownloadProgress((event) => {
+//   const cb = downloadListeners.progress.get(event.jobId);
+//   if (cb) cb(event);
+// });
 
-RNFS2Nitro.listenToDownloadComplete((event) => {
-  const cb = downloadListeners.complete.get(event.jobId);
-  if (cb) cb(event);
-});
+// RNFS2Nitro.listenToDownloadComplete((event) => {
+//   const cb = downloadListeners.complete.get(event.jobId);
+//   if (cb) cb(event);
+// });
 
-RNFS2Nitro.listenToDownloadError((event) => {
-  const cb = downloadListeners.error.get(event.jobId);
-  if (cb) cb(event);
-});
+// RNFS2Nitro.listenToDownloadError((event) => {
+//   const cb = downloadListeners.error.get(event.jobId);
+//   if (cb) cb(event);
+// });
 
-RNFS2Nitro.listenToDownloadCanBeResumed((event) => {
-  const cb = downloadListeners.canBeResumed.get(event.jobId);
-  if (cb) cb(event);
-});
+// RNFS2Nitro.listenToDownloadCanBeResumed((event) => {
+//   const cb = downloadListeners.canBeResumed.get(event.jobId);
+//   if (cb) cb(event);
+// });
 
 // --- Legacy-compatible API ---
 const compat = {
@@ -227,6 +189,7 @@ const compat = {
   ): Promise<void> {
     const options = parseOptions(encodingOrOptions);
     const data = encodeContents(contents, options.encoding);
+
     return RNFS2Nitro.writeFile(
       normalizeFilePath(filepath),
       data as ArrayBuffer

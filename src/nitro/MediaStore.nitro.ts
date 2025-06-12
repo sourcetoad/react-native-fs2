@@ -1,12 +1,6 @@
 import type { HybridObject } from 'react-native-nitro-modules';
 
-// Copied from Fs2.nitro.ts, ensure these are available or re-define if necessary
-export type MediaCollectionType =
-  | 'audio'
-  | 'video'
-  | 'images'
-  | 'downloads'
-  | 'files';
+export type MediaCollectionType = 'Audio' | 'Video' | 'Image' | 'Download';
 
 export interface FileDescriptor {
   name: string; // Display name, e.g., "MyPhoto.jpg"

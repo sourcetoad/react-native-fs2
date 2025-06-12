@@ -4,10 +4,10 @@
   "description": "Native filesystem access for react-native",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
-  "react-native": "./src/index.tsx",
+  "react-native": "./src/index.ts",
   "exports": {
     ".": {
-      "source": "./src/index.tsx",
+      "source": "./src/index.ts",
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
@@ -36,8 +36,9 @@
   "scripts": {
     "example": "yarn workspace react-native-fs2-example",
     "test": "jest",
-    "typecheck": "tsc",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "lint:fix": "eslint \"**/*.{js,ts,tsx}\" --fix",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "nitrogen": "nitro-codegen"
@@ -150,5 +151,8 @@
     "languages": "kotlin-swift",
     "type": "nitro-module",
     "version": "0.50.2"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3"
   }
 }
