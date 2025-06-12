@@ -1,3 +1,6 @@
+export type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
+export type EncodingOrOptions = Encoding | { encoding?: Encoding };
+
 export type StatResult = {
   type?: any; // TODO
   name?: string; // The name of the item

@@ -92,7 +92,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
     guard let task = task else { return }
     task.cancel { resumeDataOrNil in
       self.resumeData = resumeDataOrNil
-      self.delegate?.downloadIsResumable(jobId: self.jobId, resumable: resumeDataOrNil != nil)
     }
   }
 
@@ -225,7 +224,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
       print("[Downloader] didCompleteWithError: \(error), userInfo: \(error.userInfo)")
       if let resumeData = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
         self.resumeData = resumeData
-        delegate?.downloadIsResumable(jobId: jobId, resumable: true)
         delegate?.downloadCanBeResumed(jobId: jobId)
       } else {
         delegate?.downloadDidError(jobId: jobId, error: error)

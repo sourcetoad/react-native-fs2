@@ -15,6 +15,10 @@
     "Fs2": {
       "swift": "Fs2",
       "kotlin": "Fs2"
+    },
+    "MediaStore": {
+      "swift": "MediaStore",
+      "kotlin": "MediaStore"
     }
   },
   "ignorePaths": [
