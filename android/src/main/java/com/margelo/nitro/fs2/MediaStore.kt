@@ -2,40 +2,101 @@ package com.margelo.nitro.fs2
 
 import com.margelo.nitro.NitroModules
 import com.margelo.nitro.core.Promise
+import androidx.core.net.toUri
 
 class MediaStore(): HybridMediaStoreSpec() {
+    private val reactContext = NitroModules.applicationContext!!
+    private val mediaStoreManager = RNFSMediaStoreManager(reactContext)
+
+    private fun reject(context: String, ex: Exception): Throwable {
+        // You can expand this for more specific error types as needed
+        throw Error(ex.message ?: "Error in MediaStore operation: $context")
+    }
+
     override fun mediaStoreCreateFile(
-        fileDescriptor: FileDescriptor,
+        fileDescription: FileDescription,
         mediaCollection: MediaCollectionType
     ): Promise<String> {
-        TODO("Not yet implemented")
+        return Promise.async {
+            try {
+                val uri = mediaStoreManager.createMediaFile(fileDescription, mediaCollection)
+                return@async uri.toString()
+            } catch (e: Exception) {
+                throw reject(fileDescription.name, e)
+            }
+        }
     }
 
     override fun mediaStoreUpdateFile(
         uri: String,
-        fileDescriptor: FileDescriptor,
+        fileDescription: FileDescription,
         mediaCollection: MediaCollectionType
     ): Promise<String> {
-        TODO("Not yet implemented")
+        return Promise.async {
+            try {
+                val updated = mediaStoreManager.updateMediaFile(uri.toUri(), fileDescription, mediaCollection)
+                if (updated) {
+                    return@async uri
+                } else {
+                    throw Error("Failed to update file: $uri")
+                }
+            } catch (e: Exception) {
+                throw reject(uri, e)
+            }
+        }
     }
 
     override fun mediaStoreWriteToFile(uri: String, sourceFilePath: String): Promise<Unit> {
-        TODO("Not yet implemented")
+        return Promise.async {
+            try {
+                val success = mediaStoreManager.writeToMediaFile(uri.toUri(), sourceFilePath)
+                if (success) {
+                    return@async
+                } else {
+                    throw Error("Failed to write to file: $uri")
+                }
+            } catch (e: Exception) {
+                throw reject(uri, e)
+            }
+        }
     }
 
     override fun mediaStoreCopyFromFile(
         sourceFilePath: String,
-        fileDescriptor: FileDescriptor,
+        fileDescription: FileDescription,
         mediaCollection: MediaCollectionType
     ): Promise<String> {
-        TODO("Not yet implemented")
+        return Promise.async {
+            try {
+                val uri = mediaStoreManager.copyToMediaStore(fileDescription, mediaCollection, sourceFilePath)
+                return@async uri.toString()
+            } catch (e: Exception) {
+                throw reject(sourceFilePath, e)
+            }
+        }
     }
 
-    override fun mediaStoreQueryFiles(searchOptions: MediaStoreSearchOptions): Promise<Array<MediaStoreFile>> {
-        TODO("Not yet implemented")
+    override fun mediaStoreQueryFile(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile?> {
+        return Promise.async {
+            try {
+                val file = mediaStoreManager.query(searchOptions)
+                println("MediaStore query result: $file")
+
+                return@async file
+            } catch (e: Exception) {
+                throw reject(searchOptions.fileName ?: "query", e)
+            }
+        }
     }
 
     override fun mediaStoreDeleteFile(uri: String): Promise<Boolean> {
-        TODO("Not yet implemented")
+        return Promise.async {
+            try {
+                val deleted = mediaStoreManager.delete(uri.toUri())
+                return@async deleted
+            } catch (e: Exception) {
+                throw reject(uri, e)
+            }
+        }
     }
 }

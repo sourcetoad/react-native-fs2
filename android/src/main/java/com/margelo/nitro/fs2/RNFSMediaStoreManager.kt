@@ -11,8 +11,6 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.net.toUri
-import com.margelo.nitro.fs2.Utils.FileDescription
-import com.margelo.nitro.fs2.Utils.MediaStoreQuery
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -182,40 +180,65 @@ class RNFSMediaStoreManager(private val context: Context) {
         }
     }
 
-    fun query(query: MediaStoreQuery): Uri? {
+    fun query(query: MediaStoreSearchOptions): MediaStoreFile? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
             throw UnsupportedOperationException("Android version not supported")
         var cursor: Cursor? = null
+
         try {
             val resolver = context.contentResolver
+            val queryUri:String = query.uri ?: ""
+            val queryMediaType: String = query.mediaType.toString()
+            val queryFilename: String = query.fileName ?: ""
+            val queryRelativePath: String = query.relativePath ?: ""
+
+
             val mediaURI =
-                if (query.uri.isNotEmpty()) query.uri.toUri()
-                else getMediaUri(MediaCollectionType.valueOf(query.mediaType!!))
+                if (queryUri.isNotEmpty()) queryUri.toUri()
+                else getMediaUri(MediaCollectionType.valueOf(queryMediaType))
             val projection =
                 arrayOf(
                     MediaStore.MediaColumns._ID,
                     MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.MIME_TYPE,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATE_ADDED,
+                    MediaStore.MediaColumns.DATE_MODIFIED,
                     MediaStore.MediaColumns.RELATIVE_PATH
                 )
             val selection: String?
             val selectionArgs: Array<String>?
-            if (query.uri.isEmpty()) {
-                val relativePath = getRelativePath(MediaCollectionType.valueOf(query.mediaType!!))
+            if (queryUri.isEmpty()) {
+                val relativePath = getRelativePath(MediaCollectionType.valueOf(queryMediaType))
                 selection =
                     MediaStore.MediaColumns.DISPLAY_NAME +
                             " = ? AND " +
                             MediaStore.MediaColumns.RELATIVE_PATH +
                             " = ?"
-                selectionArgs = arrayOf(query.fileName, "$relativePath/${query.relativePath}/")
+                selectionArgs = arrayOf(queryFilename, "$relativePath/${queryRelativePath}/")
             } else {
                 selection = null
                 selectionArgs = null
             }
             cursor = resolver.query(mediaURI!!, projection, selection, selectionArgs, null)
             if (cursor != null && cursor.moveToFirst()) {
-                val idColumnIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                val id = cursor.getLong(idColumnIndex)
-                return Uri.withAppendedPath(mediaURI, id.toString())
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME))
+                val mimeType = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE))
+                val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+                val dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED))
+                val dateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED))
+                val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH))
+                val fileUri = Uri.withAppendedPath(mediaURI, id.toString())
+                return MediaStoreFile(
+                    uri = fileUri.toString(),
+                    name = name,
+                    mimeType = mimeType,
+                    size = size.toDouble(),
+                    dateAdded = dateAdded,
+                    dateModified = dateModified,
+                    relativePath = relativePath
+                )
             }
             return null
         } finally {
