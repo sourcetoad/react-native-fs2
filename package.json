@@ -91,14 +91,14 @@
     "react": "19.0.0",
     "react-native": "0.79.2",
     "react-native-builder-bob": "^0.40.8",
-    "react-native-nitro-modules": "^0.25.2",
+    "react-native-nitro-modules": "^0.26.2",
     "turbo": "^1.10.7",
     "typescript": "^5.2.2"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": "*",
-    "react-native-nitro-modules": "^0.25.2"
+    "react-native-nitro-modules": "^0.26.2"
   },
   "workspaces": [
     "example"

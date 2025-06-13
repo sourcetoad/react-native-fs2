@@ -1,6 +1,5 @@
 import { NitroModules } from 'react-native-nitro-modules';
 import type { Fs2 } from './nitro/Fs2.nitro';
-import type { MediaStore as NitroMediaStore } from './nitro/MediaStore.nitro';
 import type {
   MkdirOptions,
   FSInfoResult,
@@ -10,9 +9,11 @@ import type {
   NativeStatResult,
   HashAlgorithm,
 } from './nitro/Fs2.nitro';
-import type { Encoding, EncodingOrOptions, StatResult } from './types';
+import type { EncodingOrOptions, StatResult } from './types';
 
-// --- Re-export types ---
+/**
+ * Re-export types
+ */
 export type {
   ReadDirItem,
   StatResultType,
@@ -24,39 +25,29 @@ export type {
 
 export type {
   MediaCollectionType,
-  FileDescriptor,
+  FileDescription,
   MediaStoreFile,
   MediaStoreSearchOptions,
-  SortDirection,
-  SortByType,
 } from './nitro/MediaStore.nitro';
 
-// --- Encoding helpers ---
-import { encodeContents, decodeContents } from './utils';
+/**
+ * Helpers
+ */
+import {
+  encodeContents,
+  decodeContents,
+  normalizeFilePath,
+  parseOptions,
+} from './utils';
 
-// --- Path normalization ---
-const normalizeFilePath = (path: string): string =>
-  path.startsWith('file://') ? path.slice(7) : path;
-
-function parseOptions(encodingOrOptions?: EncodingOrOptions): {
-  encoding: Encoding;
-} {
-  let options = { encoding: 'utf8' as Encoding };
-  if (!encodingOrOptions) return options;
-  if (typeof encodingOrOptions === 'string') {
-    options.encoding = encodingOrOptions as Encoding;
-  } else if (typeof encodingOrOptions === 'object') {
-    options = { ...options, ...encodingOrOptions };
-  }
-  return options;
-}
-
-// --- Nitro Hybrid Objects ---
+/**
+ * Nitro Hybrid Objects
+ */
 const RNFS2Nitro = NitroModules.createHybridObject<Fs2>('Fs2');
-const RNFS2MediaStore =
-  NitroModules.createHybridObject<NitroMediaStore>('MediaStore');
 
-// --- Download job/event management ---
+/**
+ * Download job/event management
+ */
 let globalJobId = 0;
 const getJobId = () => ++globalJobId;
 
@@ -93,7 +84,9 @@ const downloadListeners = {
 //   if (cb) cb(event);
 // });
 
-// --- Legacy-compatible API ---
+/**
+ * Legacy-compatible API
+ */
 const compat = {
   mkdir(filepath: string, options: MkdirOptions = {}): Promise<void> {
     return RNFS2Nitro.mkdir(normalizeFilePath(filepath), options);
@@ -288,9 +281,14 @@ const compat = {
   TemporaryDirectoryPath: RNFS2Nitro.temporaryDirectoryPath,
   LibraryDirectoryPath: RNFS2Nitro.libraryDirectoryPath,
   PicturesDirectoryPath: RNFS2Nitro.picturesDirectoryPath,
-
-  // --- MediaStore ---
-  MediaStore: RNFS2MediaStore,
 };
 
+/**
+ * MediaStore
+ */
+export { default as MediaStore } from './_mediastore';
+
+/**
+ * Default export
+ */
 export default compat;

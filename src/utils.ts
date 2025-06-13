@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 
-import type { Encoding } from './types';
+import type { Encoding, EncodingOrOptions } from './types';
 
 /**
  * Encodes content to ArrayBuffer based on encoding type
@@ -106,4 +106,27 @@ export function isValidEncoding(
   encodingType: string
 ): encodingType is Encoding {
   return ['utf8', 'ascii', 'base64', 'arraybuffer'].includes(encodingType);
+}
+
+/**
+ * Normalize file path
+ */
+export function normalizeFilePath(path: string): string {
+  return path.startsWith('file://') ? path.slice(7) : path;
+}
+
+/**
+ * Parse options
+ */
+export function parseOptions(encodingOrOptions?: EncodingOrOptions): {
+  encoding: Encoding;
+} {
+  let options = { encoding: 'utf8' as Encoding };
+  if (!encodingOrOptions) return options;
+  if (typeof encodingOrOptions === 'string') {
+    options.encoding = encodingOrOptions as Encoding;
+  } else if (typeof encodingOrOptions === 'object') {
+    options = { ...options, ...encodingOrOptions };
+  }
+  return options;
 }
