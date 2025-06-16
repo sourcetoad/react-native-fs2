@@ -17,10 +17,10 @@ class Fs2() : HybridFs2Spec() {
     private val listeners = DownloadListeners()
 
     data class DownloadListeners(
-        val beginListeners: MutableList<((DownloadEventResult) -> Unit)?> = mutableListOf(),
-        val progressListeners: MutableList<((DownloadEventResult) -> Unit)?> = mutableListOf(),
-        val completeListeners: MutableList<((DownloadEventResult) -> Unit)?> = mutableListOf(),
-        val errorListeners: MutableList<((DownloadEventResult) -> Unit)?> = mutableListOf()
+        val beginListeners: MutableMap<Double, ((DownloadEventResult) -> Unit)?> = mutableMapOf(),
+        val progressListeners: MutableMap<Double, ((DownloadEventResult) -> Unit)?> = mutableMapOf(),
+        val completeListeners: MutableMap<Double, ((DownloadEventResult) -> Unit)?> = mutableMapOf(),
+        val errorListeners: MutableMap<Double, ((DownloadEventResult) -> Unit)?> = mutableMapOf()
     )
 
     // Companion object to manage job IDs and active downloaders
@@ -347,56 +347,60 @@ class Fs2() : HybridFs2Spec() {
         options: DownloadFileOptions,
         headers: Map<String, String>?
     ): Promise<Double> {
-        return Promise.async {
-            try {
-                val currentJobId = options.jobId.toInt()
-                val params =
-                    DownloadParams().apply {
-                        this.jobId = currentJobId
-                        this.src = URL(options.fromUrl)
-                        this.dest = File(options.toFile)
-                        this.headers = convertHeadersToReadableMap(headers)
+        val downloadPromise:Promise<Double> = Promise()
 
-                        // Assign callbacks directly from parameters
-                        this.onDownloadBegin = { event ->
-                            listeners.beginListeners.forEach { it?.invoke(event) }
-                        }
-                        this.onDownloadProgress = { event ->
-                            listeners.progressListeners.forEach { it?.invoke(event) }
-                        }
-                        this.onDownloadComplete = { result ->
-                            listeners.completeListeners.forEach { it?.invoke(result) }
-                        }
-                        this.onDownloadError = { event ->
-                            listeners.errorListeners.forEach { it?.invoke(event) }
-                        }
-                        this.onCleanup = { finishedJobId -> downloaderDidFinish(finishedJobId) }
+        try {
+            val currentJobId = options.jobId
+            val params =
+                DownloadParams().apply {
+                    this.jobId = currentJobId.toInt()
+                    this.src = URL(options.fromUrl)
+                    this.dest = File(options.toFile)
+                    this.headers = convertHeadersToReadableMap(headers)
+
+                    // Assign callbacks directly from parameters
+                    this.onDownloadBegin = { event ->
+                        listeners.beginListeners[event.jobId]?.invoke(event)
                     }
-
-                val downloader = Downloader()
-                activeDownloaders[currentJobId] = downloader // Store the downloader instance
-                downloader.start(params)
-
-                return@async currentJobId.toDouble()
-            } catch (e: Exception) {
-                // Handle synchronous errors during setup (e.g., invalid URL)
-                // Asynchronous errors during download will be reported via onDownloadError
-                // callback.
-                listeners.errorListeners.forEach {
-                    it?.invoke(
-                        DownloadEventResult(
-                            jobId = -1.0,
-                            headers = null,
-                            contentLength = null,
-                            bytesWritten = null,
-                            statusCode = null,
-                            error = e.message ?: "Error setting up download",
-                        )
-                    )
+                    this.onDownloadProgress = { event ->
+                        listeners.progressListeners[event.jobId]?.invoke(event)
+                    }
+                    this.onDownloadComplete = { result ->
+                        listeners.completeListeners[result.jobId]?.invoke(result)
+                    }
+                    this.onDownloadError = { event ->
+                        listeners.errorListeners[event.jobId]?.invoke(event)
+                    }
+                    this.onCleanup = { finishedJobId ->
+                        downloaderDidFinish(finishedJobId)
+                        downloadPromise.resolve(finishedJobId.toDouble())
+                    }
                 }
-                throw reject(options.toFile, e) // Also rethrow for the promise rejection
-            }
+
+            val downloader = Downloader()
+            activeDownloaders[currentJobId.toInt()] = downloader // Store the downloader instance
+            downloader.start(params)
+        } catch (e: Exception) {
+            val currentJobId = options.jobId
+
+            // Handle synchronous errors during setup (e.g., invalid URL)
+            // Asynchronous errors during download will be reported via onDownloadError
+            // callback.
+            listeners.errorListeners[currentJobId]?.invoke(
+                DownloadEventResult(
+                    jobId = currentJobId,
+                    headers = null,
+                    contentLength = null,
+                    bytesWritten = null,
+                    statusCode = null,
+                    error = e.message ?: "Error setting up download",
+                )
+            )
+
+            downloadPromise.reject(throw reject(options.toFile, e)) // Also rethrow for the promise rejection
         }
+
+        return downloadPromise
     }
 
     override fun stopDownload(jobId: Double): Promise<Unit> {
@@ -441,35 +445,40 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun listenToDownloadBegin(
+        jobId: Double,
         onDownloadBegin: ((event: DownloadEventResult) -> Unit)?
     ): () -> Unit {
-        listeners.beginListeners.add(onDownloadBegin)
-        return { listeners.beginListeners.remove(onDownloadBegin) }
+        listeners.beginListeners[jobId] = onDownloadBegin
+        return { listeners.beginListeners.remove(jobId) }
     }
 
     override fun listenToDownloadProgress(
+        jobId: Double,
         onDownloadProgress: ((event: DownloadEventResult) -> Unit)?
     ): () -> Unit {
-        listeners.progressListeners.add(onDownloadProgress)
-        return { listeners.progressListeners.remove(onDownloadProgress) }
+        listeners.progressListeners[jobId] = onDownloadProgress
+        return { listeners.progressListeners.remove(jobId) }
     }
 
     override fun listenToDownloadComplete(
+        jobId: Double,
         onDownloadComplete: ((result: DownloadEventResult) -> Unit)?
     ): () -> Unit {
-        listeners.completeListeners.add(onDownloadComplete)
-        return { listeners.completeListeners.remove(onDownloadComplete) }
+        listeners.completeListeners[jobId] = onDownloadComplete
+        return { listeners.completeListeners.remove(jobId) }
     }
 
     override fun listenToDownloadError(
+        jobId: Double,
         onDownloadError: ((event: DownloadEventResult) -> Unit)?
     ): () -> Unit {
-        listeners.errorListeners.add(onDownloadError)
-        return { listeners.errorListeners.remove(onDownloadError) }
+        listeners.errorListeners[jobId] = onDownloadError
+        return { listeners.errorListeners.remove(jobId) }
     }
 
     // iOS only: No-op on Android
     override fun listenToDownloadCanBeResumed(
+        jobId: Double,
         onDownloadCanBeResumed: ((event: DownloadEventResult) -> Unit)?
     ): () -> Unit {
         // No-op, Android does not support download can-be-resumed events

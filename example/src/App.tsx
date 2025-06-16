@@ -18,6 +18,7 @@ import { getTestFolder, requestAndroidPermission } from './utils';
 import Example1 from './example1';
 import Example2 from './example2';
 import Example3 from './example3';
+import Example4 from './example4';
 
 const App = () => {
   // methods
@@ -82,6 +83,7 @@ const App = () => {
           <Example1 />
           <Example2 />
           <Example3 />
+          <Example4 />
         </View>
       </ScrollView>
     </SafeAreaView>
