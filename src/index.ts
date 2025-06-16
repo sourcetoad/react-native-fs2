@@ -59,31 +59,6 @@ const downloadListeners = {
   canBeResumed: new Map<number, (event: DownloadEventResult) => void>(),
 };
 
-// RNFS2Nitro.listenToDownloadBegin((event) => {
-//   const cb = downloadListeners.begin.get(event.jobId);
-//   if (cb) cb(event);
-// });
-
-// RNFS2Nitro.listenToDownloadProgress((event) => {
-//   const cb = downloadListeners.progress.get(event.jobId);
-//   if (cb) cb(event);
-// });
-
-// RNFS2Nitro.listenToDownloadComplete((event) => {
-//   const cb = downloadListeners.complete.get(event.jobId);
-//   if (cb) cb(event);
-// });
-
-// RNFS2Nitro.listenToDownloadError((event) => {
-//   const cb = downloadListeners.error.get(event.jobId);
-//   if (cb) cb(event);
-// });
-
-// RNFS2Nitro.listenToDownloadCanBeResumed((event) => {
-//   const cb = downloadListeners.canBeResumed.get(event.jobId);
-//   if (cb) cb(event);
-// });
-
 /**
  * Legacy-compatible API
  */
@@ -243,15 +218,53 @@ const compat = {
     }
   ): { jobId: number; promise: Promise<any> } {
     const jobId = getJobId();
+    const subscriptions: Array<() => void> = [];
 
-    if (options.begin) downloadListeners.begin.set(jobId, options.begin);
-    if (options.progress)
+    if (options.begin) {
+      downloadListeners.begin.set(jobId, options.begin);
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadBegin(jobId, (event) => {
+          const cb = downloadListeners.begin.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    if (options.progress) {
       downloadListeners.progress.set(jobId, options.progress);
-    if (options.complete)
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadProgress(jobId, (event) => {
+          const cb = downloadListeners.progress.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    if (options.complete) {
       downloadListeners.complete.set(jobId, options.complete);
-    if (options.error) downloadListeners.error.set(jobId, options.error);
-    if (options.canBeResumed)
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadComplete(jobId, (event) => {
+          const cb = downloadListeners.complete.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    if (options.error) {
+      downloadListeners.error.set(jobId, options.error);
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadError(jobId, (event) => {
+          const cb = downloadListeners.error.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    if (options.canBeResumed) {
       downloadListeners.canBeResumed.set(jobId, options.canBeResumed);
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadCanBeResumed(jobId, (event) => {
+          const cb = downloadListeners.canBeResumed.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
 
     const nitroOptions = {
       jobId: jobId,
@@ -267,7 +280,16 @@ const compat = {
 
     return {
       jobId,
-      promise: RNFS2Nitro.downloadFile(nitroOptions),
+      promise: RNFS2Nitro.downloadFile(nitroOptions)
+        .then((res: any) => {
+          // unsubscribe all subscriptions
+          subscriptions.forEach((unsubscribe) => unsubscribe());
+
+          return res;
+        })
+        .catch((e: any) => {
+          return Promise.reject(e);
+        }),
     };
   },
 

@@ -125,15 +125,19 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
    * Each returns an unsubscribe function.
    */
   listenToDownloadBegin(
+    jobId: number,
     onDownloadBegin?: (event: DownloadEventResult) => void
   ): () => void;
   listenToDownloadProgress(
+    jobId: number,
     onDownloadProgress?: (event: DownloadEventResult) => void
   ): () => void;
   listenToDownloadComplete(
+    jobId: number,
     onDownloadComplete?: (result: DownloadEventResult) => void
   ): () => void;
   listenToDownloadError(
+    jobId: number,
     onDownloadError?: (event: DownloadEventResult) => void
   ): () => void;
 
@@ -142,6 +146,7 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
    * Returns an unsubscribe function.
    */
   listenToDownloadCanBeResumed(
+    jobId: number,
     onDownloadCanBeResumed?: (event: DownloadEventResult) => void
   ): () => void;
 
