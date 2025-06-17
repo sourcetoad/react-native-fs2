@@ -8,6 +8,7 @@ protocol DownloaderDelegate: AnyObject {
   func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64)
   func downloadDidError(jobId: Int, error: Error)
   func downloadCanBeResumed(jobId: Int)
+  func downloadCleanup(jobId: Int)
 }
 
 class Downloader: NSObject, URLSessionDownloadDelegate {
@@ -30,6 +31,7 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
   // MARK: - Public API
 
   func startDownload(from url: URL, to destination: String, headers: [String: String]?, options: DownloadFileOptions?) {
+    
     if FileManager.default.fileExists(atPath: destination) {
       do {
         let fileHandle = try FileHandle(forWritingTo: URL(fileURLWithPath: destination))
@@ -191,6 +193,7 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
     defer {
       self.session?.finishTasksAndInvalidate()
       self.clearState()
+      delegate?.downloadCleanup(jobId: jobId)
     }
 
     // Move file to destination
@@ -218,6 +221,7 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
     defer {
       self.session?.finishTasksAndInvalidate()
       self.clearState()
+      delegate?.downloadCleanup(jobId: jobId)
     }
 
     if let error = error as NSError? {

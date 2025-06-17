@@ -1,12 +1,10 @@
 package com.margelo.nitro.fs2
 
-import com.margelo.nitro.NitroModules
 import com.margelo.nitro.core.Promise
 import androidx.core.net.toUri
 
 class MediaStore(): HybridMediaStoreSpec() {
-    private val reactContext = NitroModules.applicationContext!!
-    private val mediaStoreManager = RNFSMediaStoreManager(reactContext)
+    private val mediaStoreManager = RNFSMediaStoreManager()
 
     private fun reject(context: String, ex: Exception): Throwable {
         // You can expand this for more specific error types as needed
@@ -77,16 +75,22 @@ class MediaStore(): HybridMediaStoreSpec() {
     }
 
     override fun mediaStoreQueryFile(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile?> {
-        return Promise.async {
-            try {
-                val file = mediaStoreManager.query(searchOptions)
-                println("MediaStore query result: $file")
+        val queryPromise:Promise<MediaStoreFile?> = Promise()
 
-                return@async file
-            } catch (e: Exception) {
-                throw reject(searchOptions.fileName ?: "query", e)
+        try {
+            val file = mediaStoreManager.query(searchOptions)
+
+            if (file != null) {
+                queryPromise.resolve(file)
+            } else {
+                println("File not found: ${searchOptions.fileName}")
+                queryPromise.reject(Error("File not found: ${searchOptions.fileName}"))
             }
+        } catch (e: Exception) {
+            throw reject(searchOptions.fileName ?: "query", e)
         }
+
+        return queryPromise
     }
 
     override fun mediaStoreDeleteFile(uri: String): Promise<Boolean> {

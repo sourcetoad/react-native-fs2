@@ -397,7 +397,7 @@ class Fs2() : HybridFs2Spec() {
                 )
             )
 
-            downloadPromise.reject(throw reject(options.toFile, e)) // Also rethrow for the promise rejection
+            downloadPromise.reject(reject(options.toFile, e)) // Also rethrow for the promise rejection
         }
 
         return downloadPromise

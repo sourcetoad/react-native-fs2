@@ -13,6 +13,8 @@ class Fs2: HybridFs2Spec {
   public let externalDirectoryPath: String = ""
   public let externalStorageDirectoryPath: String = ""
   
+  private let downloaderQueue = DispatchQueue(label: "com.margelo.nitro.fs2.downloaderQueue")
+  
   // Downloader instance
   private let downloader = Downloader()
   
@@ -25,6 +27,11 @@ class Fs2: HybridFs2Spec {
   
   // Downloader instances per jobId
   private var downloaders: [Int: Downloader] = [:]
+  // Store Promises per jobId for downloadFile
+  private var downloadPromises: [Int: (resolve: (Double) -> Void, reject: (Error) -> Void)] = [:]
+  
+  // Store continuations per jobId for downloadFile
+  private var downloadContinuations: [Int: CheckedContinuation<Double, Error>] = [:]
   
   override init() {
     self.cachesDirectoryPath = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path ?? ""
@@ -637,38 +644,54 @@ class Fs2: HybridFs2Spec {
     headers: [String: String]?
   ) -> Promise<Double> {
     return Promise<Double>.async {
-      let processedHeaders: [String: String]? = nil
-      guard let url = URL(string: options.fromUrl) else {
-        let errorEvent = DownloadEventResult(
-          jobId: -1,
-          headers: nil,
-          contentLength: nil,
-          statusCode: nil,
-          bytesWritten: nil,
-          error: "Invalid URL: \(options.fromUrl)"
-        )
-        for cb in self.errorListeners.values {
-          cb(errorEvent)
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
+        let processedHeaders: [String: String]? = headers
+
+        guard let url = URL(string: options.fromUrl) else {
+          let errorEvent = DownloadEventResult(
+            jobId: -1,
+            headers: nil,
+            contentLength: nil,
+            statusCode: nil,
+            bytesWritten: nil,
+            error: "Invalid URL: \(options.fromUrl)"
+          )
+          
+          self.downloaderQueue.sync {
+            for cb in self.errorListeners.values {
+              cb(errorEvent)
+            }
+          }
+          continuation.resume(throwing: NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(options.fromUrl)"]))
+          
+          return
         }
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(options.fromUrl)"])
+
+        let jobId = Int(options.jobId)
+        let downloader = Downloader()
+        downloader.delegate = self
+        
+        self.downloaderQueue.sync {
+          self.downloaders[jobId] = downloader
+          self.downloadContinuations[jobId] = continuation
+        }
+        
+        downloader.startDownload(from: url, to: options.toFile, headers: processedHeaders, options: options)
       }
-      
-      let jobId = Int(options.jobId)
-      let downloader = Downloader()
-      downloader.delegate = self
-      self.downloaders[jobId] = downloader
-      downloader.startDownload(from: url, to: options.toFile, headers: processedHeaders, options: options)
-      return Double(jobId)
     }
   }
   
   func stopDownload(jobId: Double) -> Promise<Void> {
     return Promise<Void>.async {
       let intJobId = Int(jobId)
-      self.downloaders[intJobId]?.stopDownload()
-      // Only cleanup if not resumable
-      if let downloader = self.downloaders[intJobId], !downloader.isResumable() {
-        self.downloaders.removeValue(forKey: intJobId)
+      self.downloaderQueue.sync {
+        if let downloader = self.downloaders[intJobId] {
+          downloader.stopDownload()
+          // Only cleanup if not resumable
+          if !downloader.isResumable() {
+            self.downloaders.removeValue(forKey: intJobId)
+          }
+        }
       }
     }
   }
@@ -676,51 +699,55 @@ class Fs2: HybridFs2Spec {
   func resumeDownload(jobId: Double) -> Promise<Void> {
     return Promise<Void>.async {
       let intJobId = Int(jobId)
-      self.downloaders[intJobId]?.resumeDownload()
+      self.downloaderQueue.sync {
+        self.downloaders[intJobId]?.resumeDownload()
+      }
     }
   }
   
   func isResumable(jobId: Double) -> Promise<Bool> {
     return Promise<Bool>.async {
       let intJobId = Int(jobId)
-      return self.downloaders[intJobId]?.isResumable() ?? false
+      return self.downloaderQueue.sync {
+        self.downloaders[intJobId]?.isResumable() ?? false
+      }
     }
   }
 
   // download listeners
   func listenToDownloadBegin(jobId: Double, onDownloadBegin: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     if let cb = onDownloadBegin {
-      self.beginListeners[jobId] = cb
+      self.downloaderQueue.sync { self.beginListeners[jobId] = cb }
     }
-    return { [weak self] in self?.beginListeners.removeValue(forKey: jobId) }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.beginListeners.removeValue(forKey: jobId) } }
   }
 
   func listenToDownloadProgress(jobId: Double, onDownloadProgress: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     if let cb = onDownloadProgress {
-      self.progressListeners[jobId] = cb
+      self.downloaderQueue.sync { self.progressListeners[jobId] = cb }
     }
-    return { [weak self] in self?.progressListeners.removeValue(forKey: jobId) }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.progressListeners.removeValue(forKey: jobId) } }
   }
 
   func listenToDownloadComplete(jobId: Double, onDownloadComplete: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     if let cb = onDownloadComplete {
-      self.completeListeners[jobId] = cb
+      self.downloaderQueue.sync { self.completeListeners[jobId] = cb }
     }
-    return { [weak self] in self?.completeListeners.removeValue(forKey: jobId) }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.completeListeners.removeValue(forKey: jobId) } }
   }
 
   func listenToDownloadError(jobId: Double, onDownloadError: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     if let cb = onDownloadError {
-      self.errorListeners[jobId] = cb
+      self.downloaderQueue.sync { self.errorListeners[jobId] = cb }
     }
-    return { [weak self] in self?.errorListeners.removeValue(forKey: jobId) }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.errorListeners.removeValue(forKey: jobId) } }
   }
 
   func listenToDownloadCanBeResumed(jobId: Double, onDownloadCanBeResumed: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
     if let cb = onDownloadCanBeResumed {
-      self.canBeResumedListeners[jobId] = cb
+      self.downloaderQueue.sync { self.canBeResumedListeners[jobId] = cb }
     }
-    return { [weak self] in self?.canBeResumedListeners.removeValue(forKey: jobId) }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.canBeResumedListeners.removeValue(forKey: jobId) } }
   }
 
   // misc
@@ -744,8 +771,10 @@ extension Fs2: DownloaderDelegate {
     let headersDict = headers ?? [:]
     let tempHeaderMap = AnyMapHolder()
 
-    for (key, stringValue) in headersDict {
-      tempHeaderMap.setString(key: key as! String, value: stringValue as! String)
+    for (key, value) in headersDict {
+      if let keyStr = key as? String, let valueStr = value as? String {
+        tempHeaderMap.setString(key: keyStr, value: valueStr)
+      }
     }
 
     let event = DownloadEventResult(
@@ -757,7 +786,11 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    self.beginListeners[Double(jobId)]?(event)
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.beginListeners[Double(jobId)]
+    }
+    listener?(event)
   }
 
   func downloadDidProgress(jobId: Int, contentLength: Int64, bytesWritten: Int64) {
@@ -770,7 +803,11 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    self.progressListeners[Double(jobId)]?(event)
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.progressListeners[Double(jobId)]
+    }
+    listener?(event)
   }
 
   func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64) {
@@ -783,9 +820,11 @@ extension Fs2: DownloaderDelegate {
       error: nil
     )
 
-    self.completeListeners[Double(jobId)]?(result)
-    // Always cleanup on complete
-    self.downloaders.removeValue(forKey: jobId)
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.completeListeners[Double(jobId)]
+    }
+    listener?(result)
   }
 
   func downloadDidError(jobId: Int, error: Error) {
@@ -798,11 +837,11 @@ extension Fs2: DownloaderDelegate {
       error: error.localizedDescription
     )
 
-    self.errorListeners[Double(jobId)]?(event)
-    // Only cleanup if not resumable
-    if let downloader = self.downloaders[jobId], !downloader.isResumable() {
-      self.downloaders.removeValue(forKey: jobId)
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.errorListeners[Double(jobId)]
     }
+    listener?(event)
   }
 
   func downloadCanBeResumed(jobId: Int) {
@@ -814,6 +853,22 @@ extension Fs2: DownloaderDelegate {
       bytesWritten: nil,
       error: nil
     )
-    self.canBeResumedListeners[Double(jobId)]?(event)
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.canBeResumedListeners[Double(jobId)]
+    }
+    listener?(event)
+  }
+
+  // Always called in a defer/finally block from Downloader
+  func downloadCleanup(jobId: Int) {
+    self.downloaderQueue.sync {
+      self.downloaders.removeValue(forKey: jobId)
+      // Remove and resolve/reject continuation if still present (should be nil if already handled)
+      if let continuation = self.downloadContinuations.removeValue(forKey: jobId) {
+        // Defensive: always resolve if not already
+        continuation.resume(returning: Double(jobId))
+      }
+    }
   }
 }
