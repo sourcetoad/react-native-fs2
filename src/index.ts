@@ -311,6 +311,11 @@ const compat = {
 export { default as MediaStore } from './_mediastore';
 
 /**
+ * File Stream API
+ */
+export * from './_filestream';
+
+/**
  * Default export
  */
 export default compat;
