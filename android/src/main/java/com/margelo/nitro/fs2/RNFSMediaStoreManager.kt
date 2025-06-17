@@ -17,8 +17,14 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
 
-class RNFSMediaStoreManager(private val context: Context) {
+import com.margelo.nitro.NitroModules
+
+class RNFSMediaStoreManager {
+    private val context = NitroModules.applicationContext
+        ?: throw IllegalStateException("NitroModules.applicationContext is null")
+
     companion object {
+        private const val BUFFER_SIZE = 10240
         private fun getMediaUri(mt: MediaCollectionType): Uri? {
             return when (mt) {
                 MediaCollectionType.AUDIO ->
@@ -111,13 +117,13 @@ class RNFSMediaStoreManager(private val context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
             throw UnsupportedOperationException("Android version not supported")
         val resolver = context.contentResolver
-        var stream: OutputStream? = null
         try {
             val src = File(filePath)
             if (!src.exists()) throw IOException("No such file ('$filePath')")
             val descr =
                 resolver.openFileDescriptor(fileUri, "w")
                     ?: throw IOException("Failed to open file descriptor")
+
             FileInputStream(src).use { fin ->
                 FileOutputStream(descr.fileDescriptor).use { out ->
                     if (transformFile) {
@@ -125,7 +131,7 @@ class RNFSMediaStoreManager(private val context: Context) {
                         // Implement transformation logic if needed
                         out.write(bytes) // No transformation in this version
                     } else {
-                        val buf = ByteArray(1024 * 10)
+                        val buf = ByteArray(BUFFER_SIZE)
                         var read: Int
                         while (fin.read(buf).also { read = it } > 0) {
                             out.write(buf, 0, read)
@@ -133,13 +139,10 @@ class RNFSMediaStoreManager(private val context: Context) {
                     }
                 }
             }
-            stream = resolver.openOutputStream(fileUri)
-            stream?.close()
+            
             return true
         } catch (e: Exception) {
             throw IOException("Failed to write file: ${e.message}", e)
-        } finally {
-            stream?.close()
         }
     }
 
@@ -192,10 +195,16 @@ class RNFSMediaStoreManager(private val context: Context) {
             val queryFilename: String = query.fileName ?: ""
             val queryRelativePath: String = query.relativePath ?: ""
 
+            val mediaCollectionType = try {
+                MediaCollectionType.valueOf(queryMediaType)
+            } catch (e: IllegalArgumentException) {
+                Log.e("RNFS2", "Invalid media type provided: $queryMediaType")
+                return null
+            }
 
             val mediaURI =
                 if (queryUri.isNotEmpty()) queryUri.toUri()
-                else getMediaUri(MediaCollectionType.valueOf(queryMediaType))
+                else getMediaUri(mediaCollectionType)
             val projection =
                 arrayOf(
                     MediaStore.MediaColumns._ID,
@@ -209,7 +218,7 @@ class RNFSMediaStoreManager(private val context: Context) {
             val selection: String?
             val selectionArgs: Array<String>?
             if (queryUri.isEmpty()) {
-                val relativePath = getRelativePath(MediaCollectionType.valueOf(queryMediaType))
+                val relativePath = getRelativePath(mediaCollectionType)
                 selection =
                     MediaStore.MediaColumns.DISPLAY_NAME +
                             " = ? AND " +

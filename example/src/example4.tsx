@@ -13,7 +13,10 @@ import { getTestFolder, getFolderText } from './utils';
 
 const EXAMPLE_FOLDER = 'RNFS2Example4Folder';
 const FILE_NAME = 'picsum.jpg';
-const FILE_URL = 'https://picsum.photos/200';
+const FILE_URL = 'https://picsum.photos/seed/picsum/200/300';
+
+const FILE_NAME2 = 'picsum2.jpg';
+const FILE_URL2 = 'https://picsum.photos/id/237/200/300';
 
 const Example = () => {
   const [runningAction, setRunningAction] = useState(false);
@@ -36,6 +39,7 @@ const Example = () => {
 
       // Download file
       const filePath = `${folder}/${EXAMPLE_FOLDER}/${FILE_NAME}`;
+      const filePath2 = `${folder}/${EXAMPLE_FOLDER}/${FILE_NAME2}`;
       runStatus += `\n- Downloading file from ${FILE_URL}`;
       setResult(runStatus);
 
@@ -71,6 +75,27 @@ const Example = () => {
         error: (event) => {
           console.log('downloadFile error', event);
           setResult('Error Running Example: ' + event.error);
+        },
+        canBeResumed: (event) => {
+          console.log('downloadFile canBeResumed', event);
+        },
+      });
+
+      RNFS.downloadFile({
+        fromUrl: FILE_URL2,
+        toFile: filePath2,
+        jobId,
+        begin: (event) => {
+          console.log('downloadFile begin', event);
+        },
+        progress: (event) => {
+          console.log('downloadFile progress', event);
+        },
+        complete: async (event) => {
+          console.log('downloadFile complete', event);
+        },
+        error: (event) => {
+          console.log('downloadFile error', event);
         },
         canBeResumed: (event) => {
           console.log('downloadFile canBeResumed', event);
