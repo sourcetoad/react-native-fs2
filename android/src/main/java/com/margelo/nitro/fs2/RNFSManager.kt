@@ -16,6 +16,7 @@ import java.io.RandomAccessFile
 import java.security.MessageDigest
 import androidx.core.net.toUri
 import com.facebook.react.bridge.ReactApplicationContext
+import com.margelo.nitro.fs2.utils.Fs2Util
 
 class RNFSManager(private val context: ReactApplicationContext) {
     companion object {
