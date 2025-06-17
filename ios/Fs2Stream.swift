@@ -144,7 +144,6 @@ class Fs2Stream: HybridFs2StreamSpec {
       state.isActive = true
 
       let bufferSize = Int(state.options?.bufferSize ?? 8192)
-      let encoding = state.options?.encoding ?? .arraybuffer
       let start = state.options?.start ?? 0
       let end = state.options?.end
       var position = start
@@ -181,7 +180,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             let data = try state.fileHandle.read(upToCount: bytesToRead) ?? Data()
             if data.isEmpty { break }
             let arrayBuffer = try ArrayBufferHolder.copy(data: data)
-            self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(streamId: streamId, data: arrayBuffer, chunk: chunk, position: position, encoding: encoding))
+            self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(streamId: streamId, data: arrayBuffer, chunk: chunk, position: position))
             position += Int64(data.count)
             state.position = position
             bytesReadTotal += Int64(data.count)
@@ -263,25 +262,6 @@ class Fs2Stream: HybridFs2StreamSpec {
       if !state.isActive { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write stream is not active: \(streamId)"]) }
       let data = data.toData(copyIfNeeded: true)
       state.writeBufferContinuation?.yield((data, false))
-      if let task = state.task, task.isCancelled { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write job is not active"]) }
-    }
-  }
-
-  func writeStringToStream(streamId: String, data: String) throws -> NitroModules.Promise<Void> {
-    return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
-      }
-      if !state.isActive { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write stream is not active: \(streamId)"]) }
-      let encoding = state.options?.encoding ?? .utf8
-      let bytes: Data
-      switch encoding {
-      case .utf8: bytes = data.data(using: .utf8) ?? Data()
-      case .ascii: bytes = data.data(using: .ascii) ?? Data()
-      case .base64: bytes = Data(base64Encoded: data) ?? Data()
-      default: bytes = data.data(using: .utf8) ?? Data()
-      }
-      state.writeBufferContinuation?.yield((bytes, true))
       if let task = state.task, task.isCancelled { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write job is not active"]) }
     }
   }

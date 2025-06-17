@@ -161,7 +161,6 @@ class Fs2Stream(): HybridFs2StreamSpec() {
             if (state.job == null) {
                 state.job = streamScope.launch {
                     val bufferSize = state.options?.bufferSize ?: 8192
-                    val encoding = state.options?.encoding ?: Encoding.ARRAYBUFFER
                     val start = state.options?.start ?: 0L
                     val end = state.options?.end
                     var position = start
@@ -195,8 +194,7 @@ class Fs2Stream(): HybridFs2StreamSpec() {
                                             streamId = streamId,
                                             data = ArrayBuffer.copy(java.nio.ByteBuffer.wrap(data)),
                                             chunk = chunk,
-                                            position = position,
-                                            encoding = encoding
+                                            position = position
                                         )
                                     )
 
@@ -298,22 +296,6 @@ class Fs2Stream(): HybridFs2StreamSpec() {
                 }
             }
             impl.queue.add(WriteRequest(bytes))
-            impl.state.job?.let { if (!it.isActive) throw Exception("EPIPE: Write job is not active") }
-        }
-    }
-
-    override fun writeStringToStream(streamId: String, data: String): Promise<Unit> {
-        return Promise.async {
-            val impl = writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
-            if (!impl.state.isActive) throw Exception("EPIPE: Write stream is not active: $streamId")
-            val encoding = impl.state.options?.encoding ?: Encoding.UTF8
-            val bytes = when (encoding) {
-                Encoding.UTF8 -> data.toByteArray(Charsets.UTF_8)
-                Encoding.ASCII -> data.toByteArray(Charsets.US_ASCII)
-                Encoding.BASE64 -> android.util.Base64.decode(data, android.util.Base64.DEFAULT)
-                else -> data.toByteArray()
-            }
-            impl.queue.add(WriteRequest(bytes, isString = true))
             impl.state.job?.let { if (!it.isActive) throw Exception("EPIPE: Write job is not active") }
         }
     }
