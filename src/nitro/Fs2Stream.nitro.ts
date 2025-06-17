@@ -1,19 +1,13 @@
 import type { HybridObject } from 'react-native-nitro-modules';
 
-// Stream related types - using same encoding as main API
-import type { Encoding } from '../types';
-export type StreamEncoding = Encoding;
-
 export interface ReadStreamOptions {
   bufferSize?: number;
-  encoding?: StreamEncoding;
   start?: bigint;
   end?: bigint;
 }
 
 export interface WriteStreamOptions {
   append?: boolean;
-  encoding?: StreamEncoding;
   bufferSize?: number;
   createDirectories?: boolean;
 }
@@ -32,7 +26,6 @@ export interface ReadStreamDataEvent {
   data: ArrayBuffer;
   chunk: bigint;
   position: bigint;
-  encoding: StreamEncoding;
 }
 
 export interface ReadStreamProgressEvent {
@@ -93,7 +86,6 @@ export interface Fs2Stream
 
   // Write Stream Control
   writeToStream(streamId: string, data: ArrayBuffer): Promise<void>;
-  writeStringToStream(streamId: string, data: string): Promise<void>;
   flushWriteStream(streamId: string): Promise<void>;
   closeWriteStream(streamId: string): Promise<void>;
   isWriteStreamActive(streamId: string): Promise<boolean>;

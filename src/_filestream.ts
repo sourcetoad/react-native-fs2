@@ -20,7 +20,6 @@ import type { Encoding } from './types';
  * Re-export stream types for external use
  */
 export type {
-  StreamEncoding,
   ReadStreamOptions,
   WriteStreamOptions,
   ReadStreamHandle,
@@ -59,7 +58,6 @@ export interface ExtendedReadStreamHandle extends ReadStreamHandle {
  */
 export interface ExtendedWriteStreamHandle extends WriteStreamHandle {
   write(data: ArrayBuffer): Promise<void>;
-  writeString(data: string): Promise<void>;
   flush(): Promise<void>;
   close(): Promise<void>;
   isActive(): Promise<boolean>;
@@ -106,8 +104,6 @@ export async function createWriteStream(
     ...handle,
     write: (data: ArrayBuffer) =>
       RNFS2StreamNitro.writeToStream(handle.streamId, data),
-    writeString: (data: string) =>
-      RNFS2StreamNitro.writeStringToStream(handle.streamId, data),
     flush: () => RNFS2StreamNitro.flushWriteStream(handle.streamId),
     close: () => RNFS2StreamNitro.closeWriteStream(handle.streamId),
     isActive: () => RNFS2StreamNitro.isWriteStreamActive(handle.streamId),
@@ -226,19 +222,30 @@ export function concatenateArrayBuffers(
 }
 
 /**
- * High-level utility function to read a text file using streams
+ * High-level utility function to read a file as text or binary using streams
  */
-export async function readTextStream(
+export async function readStream(
   filePath: string,
-  encoding: Encoding = 'utf8'
-): Promise<string> {
-  const stream = await createReadStream(filePath, { encoding });
-  let content = '';
+  encoding: Encoding = 'arraybuffer'
+): Promise<string | ArrayBuffer> {
+  const stream = await createReadStream(filePath);
+  let content: string | ArrayBuffer =
+    encoding === 'arraybuffer' ? new ArrayBuffer(0) : '';
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<string | ArrayBuffer>((resolve, reject) => {
     const unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
-      const chunk = arrayBufferToString(event.data, encoding);
-      content += chunk;
+      if (encoding === 'arraybuffer') {
+        // Concatenate ArrayBuffers
+        content = concatenateArrayBuffers(content as ArrayBuffer, event.data);
+      } else {
+        // Decode chunk and append to string
+        const chunk = decodeContents(event.data, encoding);
+        if (typeof chunk !== 'string') {
+          reject(new Error('Failed to decode chunk as string'));
+          return;
+        }
+        content += chunk;
+      }
     });
 
     const unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
@@ -262,14 +269,14 @@ export async function readTextStream(
 }
 
 /**
- * High-level utility function to write text using streams
+ * High-level utility function to write text or binary using streams
  */
-export async function writeTextStream(
+export async function writeStream(
   filePath: string,
-  text: string,
-  encoding: Encoding = 'utf8'
+  data: string | ArrayBuffer,
+  encoding: Encoding = 'arraybuffer'
 ): Promise<void> {
-  const stream = await createWriteStream(filePath, { encoding });
+  const stream = await createWriteStream(filePath);
 
   return new Promise<void>((resolve, reject) => {
     const unsubscribeFinish = listenToWriteStreamFinish(stream.streamId, () => {
@@ -286,9 +293,11 @@ export async function writeTextStream(
       }
     );
 
-    const data = stringToArrayBuffer(text, encoding);
+    // Encode if needed
+    const buffer =
+      typeof data === 'string' ? encodeContents(data, encoding) : data;
     stream
-      .write(data)
+      .write(buffer)
       .then(() => stream.close())
       .catch(reject);
   });

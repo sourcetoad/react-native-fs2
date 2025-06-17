@@ -12,6 +12,8 @@ File streams are ideal for handling large files where loading entire content int
 - **Event-Driven**: Use Nitro callbacks for real-time progress updates
 - **Cross-Platform**: Consistent API across iOS and Android
 
+> **Note:** The stream API is now binary-only. All encoding/decoding (e.g., UTF-8, Base64) must be handled in JavaScript. Native code only receives and returns `ArrayBuffer`.
+
 ## Read Stream API
 
 ### `createReadStream(path: string, options?: ReadStreamOptions): Promise<ReadStreamHandle>`
@@ -29,12 +31,9 @@ Creates a read stream for efficiently reading large files in chunks.
 ```typescript
 interface ReadStreamOptions {
   bufferSize?: number;      // Buffer size in bytes (default: 4096)
-  encoding?: StreamEncoding; // 'utf8' | 'ascii' | 'base64' | 'arraybuffer' (default: 'arraybuffer')
   start?: bigint;           // Start position in bytes (default: 0)
   end?: bigint;            // End position in bytes (default: file end)
 }
-
-type StreamEncoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
 ```
 
 #### ReadStreamHandle
@@ -96,7 +95,6 @@ interface ReadStreamDataEvent {
   data: ArrayBuffer;     // Raw data chunk
   chunk: bigint;         // Chunk number (0-based)
   position: bigint;      // Current position in file
-  encoding: StreamEncoding;
 }
 
 interface ReadStreamProgressEvent {
@@ -122,39 +120,37 @@ interface ReadStreamErrorEvent {
 ### Read Stream Example
 
 ```typescript
-import { Fs2 } from 'react-native-fs2-nitro';
+import { Fs2, concatenateArrayBuffers, listenToReadStreamData, listenToReadStreamProgress, listenToReadStreamEnd, listenToReadStreamError } from 'react-native-fs2-nitro';
 
 async function readLargeFile() {
   try {
     // Create read stream
     const stream = await Fs2.createReadStream('/path/to/large-file.dat', {
-      bufferSize: 8192,     // 8KB chunks
-      encoding: 'arraybuffer'
+      bufferSize: 8192 // 8KB chunks
     });
 
     let totalData = new ArrayBuffer(0);
 
     // Listen for data chunks
-    const unsubscribeData = Fs2.listenToReadStreamData(
+    const unsubscribeData = listenToReadStreamData(
       stream.streamId,
       (event) => {
         console.log(`Received chunk ${event.chunk}, ${event.data.byteLength} bytes`);
-        
         // Accumulate data (for small files) or process chunk immediately
         totalData = concatenateArrayBuffers(totalData, event.data);
       }
     );
 
     // Listen for progress updates
-    const unsubscribeProgress = Fs2.listenToReadStreamProgress(
+    const unsubscribeProgress = listenToReadStreamProgress(
       stream.streamId,
       (event) => {
-        console.log(`Progress: ${event.progress.toFixed(1)}% (${event.bytesRead}/${event.totalBytes})`);
+        console.log(`Progress: ${(event.progress * 100).toFixed(1)}% (${event.bytesRead}/${event.totalBytes})`);
       }
     );
 
     // Listen for completion
-    const unsubscribeEnd = Fs2.listenToReadStreamEnd(
+    const unsubscribeEnd = listenToReadStreamEnd(
       stream.streamId,
       (event) => {
         console.log('Stream finished successfully');
@@ -165,7 +161,7 @@ async function readLargeFile() {
     );
 
     // Listen for errors
-    const unsubscribeError = Fs2.listenToReadStreamError(
+    const unsubscribeError = listenToReadStreamError(
       stream.streamId,
       (event) => {
         console.error('Stream error:', event.error);
@@ -202,7 +198,6 @@ Creates a write stream for efficiently writing large files in chunks.
 ```typescript
 interface WriteStreamOptions {
   append?: boolean;         // Append to existing file (default: false)
-  encoding?: StreamEncoding; // 'utf8' | 'ascii' | 'base64' | 'arraybuffer' (default: 'arraybuffer')
   bufferSize?: number;      // Internal buffer size (default: 4096)
   createDirectories?: boolean; // Create parent directories if needed (default: true)
 }
@@ -216,9 +211,6 @@ interface WriteStreamHandle {
   
   // Write data chunk to stream
   write(data: ArrayBuffer): Promise<void>;
-  
-  // Write string data (when encoding is utf8 or base64)
-  writeString(data: string): Promise<void>;
   
   // Flush any buffered data
   flush(): Promise<void>;
@@ -281,19 +273,18 @@ interface WriteStreamErrorEvent {
 ### Write Stream Example
 
 ```typescript
-import { Fs2 } from 'react-native-fs2-nitro';
+import { Fs2, listenToWriteStreamProgress, listenToWriteStreamFinish, listenToWriteStreamError } from 'react-native-fs2-nitro';
 
 async function writeLargeFile() {
   try {
     // Create write stream
     const stream = await Fs2.createWriteStream('/path/to/output-file.dat', {
       append: false,
-      encoding: 'binary',
       createDirectories: true
     });
 
     // Listen for progress
-    const unsubscribeProgress = Fs2.listenToWriteStreamProgress(
+    const unsubscribeProgress = listenToWriteStreamProgress(
       stream.streamId,
       (event) => {
         console.log(`Written: ${event.bytesWritten} bytes`);
@@ -301,7 +292,7 @@ async function writeLargeFile() {
     );
 
     // Listen for completion
-    const unsubscribeFinish = Fs2.listenToWriteStreamFinish(
+    const unsubscribeFinish = listenToWriteStreamFinish(
       stream.streamId,
       (event) => {
         console.log('Write completed:', event.bytesWritten, 'bytes');
@@ -311,7 +302,7 @@ async function writeLargeFile() {
     );
 
     // Listen for errors
-    const unsubscribeError = Fs2.listenToWriteStreamError(
+    const unsubscribeError = listenToWriteStreamError(
       stream.streamId,
       (event) => {
         console.error('Write error:', event.error);
@@ -341,110 +332,45 @@ async function writeLargeFile() {
 
 ## Utility Functions
 
-### Text Processing with Streams
+### Text and Binary Processing with Streams
 
 ```typescript
-// Read text file in chunks with specific encoding
-async function readTextStream(filePath: string, encoding: 'utf8' = 'utf8') {
-  const stream = await Fs2.createReadStream(filePath, { encoding });
-  let content = '';
+import { readStream, writeStream } from 'react-native-fs2-nitro';
 
-  return new Promise<string>((resolve, reject) => {
-    const unsubscribeData = Fs2.listenToReadStreamData(stream.streamId, (event) => {
-      // Convert ArrayBuffer to string based on encoding
-      const chunk = arrayBufferToString(event.data, encoding);
-      content += chunk;
-    });
-
-    const unsubscribeEnd = Fs2.listenToReadStreamEnd(stream.streamId, () => {
-      unsubscribeData();
-      unsubscribeEnd();
-      resolve(content);
-    });
-
-    const unsubscribeError = Fs2.listenToReadStreamError(stream.streamId, (event) => {
-      unsubscribeData();
-      unsubscribeEnd();
-      unsubscribeError();
-      reject(new Error(event.error));
-    });
-
-    stream.start();
-  });
+// Read a file as a string (text mode)
+async function readTextFile(filePath: string, encoding: 'utf8' = 'utf8') {
+  const content = await readStream(filePath, encoding);
+  // content is a string
 }
 
-// Write text with streaming
-async function writeTextStream(filePath: string, text: string, encoding: 'utf8' = 'utf8') {
-  const stream = await Fs2.createWriteStream(filePath, { encoding });
-  
-  const data = stringToArrayBuffer(text, encoding);
-  await stream.write(data);
-  await stream.close();
+// Read a file as binary (default)
+async function readBinaryFile(filePath: string) {
+  const buffer = await readStream(filePath); // default is 'arraybuffer'
+  // buffer is an ArrayBuffer
+}
+
+// Write a string to a file (text mode)
+async function writeTextFile(filePath: string, text: string, encoding: 'utf8' = 'utf8') {
+  await writeStream(filePath, text, encoding);
+}
+
+// Write binary data to a file (default)
+async function writeBinaryFile(filePath: string, buffer: ArrayBuffer) {
+  await writeStream(filePath, buffer); // default is 'arraybuffer'
 }
 ```
 
 ### File Copy with Progress
 
 ```typescript
-async function copyFileWithProgress(
+import { copyFileWithProgress } from 'react-native-fs2-nitro';
+
+async function copyFileWithProgressExample(
   sourcePath: string,
   destPath: string,
   onProgress?: (progress: number) => void
 ) {
-  const readStream = await Fs2.createReadStream(sourcePath, { bufferSize: 16384 });
-  const writeStream = await Fs2.createWriteStream(destPath, { bufferSize: 16384 });
-
-  return new Promise<void>((resolve, reject) => {
-    let unsubscribeData: (() => void) | null = null;
-    let unsubscribeProgress: (() => void) | null = null;
-    let unsubscribeEnd: (() => void) | null = null;
-    let unsubscribeError: (() => void) | null = null;
-
-    const cleanup = () => {
-      unsubscribeData?.();
-      unsubscribeProgress?.();
-      unsubscribeEnd?.();
-      unsubscribeError?.();
-    };
-
-    // Forward read data to write stream
-    unsubscribeData = Fs2.listenToReadStreamData(readStream.streamId, async (event) => {
-      try {
-        await writeStream.write(event.data);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    });
-
-    // Track progress
-    if (onProgress) {
-      unsubscribeProgress = Fs2.listenToReadStreamProgress(readStream.streamId, (event) => {
-        onProgress(event.progress);
-      });
-    }
-
-    // Handle completion
-    unsubscribeEnd = Fs2.listenToReadStreamEnd(readStream.streamId, async () => {
-      try {
-        await writeStream.close();
-        cleanup();
-        resolve();
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    });
-
-    // Handle errors
-    unsubscribeError = Fs2.listenToReadStreamError(readStream.streamId, (event) => {
-      cleanup();
-      reject(new Error(event.error));
-    });
-
-    // Start the copy
-    readStream.start();
-  });
+  await copyFileWithProgress(sourcePath, destPath, { bufferSize: 16384, onProgress });
 }
 ```
 
@@ -461,19 +387,7 @@ async function copyFileWithProgress(
 
 4. **Threading**: Stream operations run on background threads, keeping the UI responsive
 
-5. **Encoding**: Use 'arraybuffer' encoding for maximum performance when dealing with raw data
-
-## Platform Differences
-
-### iOS
-- Uses `NSInputStream` and `NSOutputStream` for efficient native streaming
-- Supports all encoding types natively
-- File system permissions handled automatically
-
-### Android  
-- Uses `FileInputStream` and `FileOutputStream` with buffer management
-- UTF-8 and Base64 encoding handled efficiently
-- Respects Android scoped storage requirements
+5. **Encoding**: All encoding/decoding is handled in JavaScript. Native code only deals with `ArrayBuffer`.
 
 ## Error Codes
 
@@ -501,13 +415,15 @@ ReactNativeBlobUtil.fs.readStream(path, encoding, bufferSize)
   });
 
 // fs2-nitro style  
-const stream = await Fs2.createReadStream(path, { encoding, bufferSize });
+const stream = await Fs2.createReadStream(path, { bufferSize });
 const unsubscribeData = Fs2.listenToReadStreamData(stream.streamId, event => { 
   /* handle event.data */ 
 });
+
 const unsubscribeEnd = Fs2.listenToReadStreamEnd(stream.streamId, () => { 
   /* handle end */ 
 });
+
 await stream.start();
 ```
 
