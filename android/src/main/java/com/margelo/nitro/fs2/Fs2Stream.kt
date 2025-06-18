@@ -18,7 +18,7 @@ import java.util.UUID
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
 
-class Fs2Stream(): HybridFs2StreamSpec() {
+class Fs2Stream() : HybridFs2StreamSpec() {
     // Stream state data classes
     private data class ReadStreamState(
         val file: File,
@@ -28,6 +28,7 @@ class Fs2Stream(): HybridFs2StreamSpec() {
         var job: Job? = null,
         val pauseMutex: kotlinx.coroutines.sync.Mutex = kotlinx.coroutines.sync.Mutex(locked = false) // Unlocked = active, Locked = paused
     )
+
     private data class WriteStreamState(
         val file: File,
         val options: WriteStreamOptions?,
@@ -45,15 +46,24 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     // Event listener maps (for demonstration, not yet emitting events)
     private val readStreamDataListeners = ConcurrentHashMap<String, (ReadStreamDataEvent) -> Unit>()
-    private val readStreamProgressListeners = ConcurrentHashMap<String, (ReadStreamProgressEvent) -> Unit>()
+    private val readStreamProgressListeners =
+        ConcurrentHashMap<String, (ReadStreamProgressEvent) -> Unit>()
     private val readStreamEndListeners = ConcurrentHashMap<String, (ReadStreamEndEvent) -> Unit>()
-    private val readStreamErrorListeners = ConcurrentHashMap<String, (ReadStreamErrorEvent) -> Unit>()
-    private val writeStreamProgressListeners = ConcurrentHashMap<String, (WriteStreamProgressEvent) -> Unit>()
-    private val writeStreamFinishListeners = ConcurrentHashMap<String, (WriteStreamFinishEvent) -> Unit>()
-    private val writeStreamErrorListeners = ConcurrentHashMap<String, (WriteStreamErrorEvent) -> Unit>()
+    private val readStreamErrorListeners =
+        ConcurrentHashMap<String, (ReadStreamErrorEvent) -> Unit>()
+    private val writeStreamProgressListeners =
+        ConcurrentHashMap<String, (WriteStreamProgressEvent) -> Unit>()
+    private val writeStreamFinishListeners =
+        ConcurrentHashMap<String, (WriteStreamFinishEvent) -> Unit>()
+    private val writeStreamErrorListeners =
+        ConcurrentHashMap<String, (WriteStreamErrorEvent) -> Unit>()
 
     // Write stream: queue for incoming writes
-    private data class WriteRequest(val data: ByteArray, val isString: Boolean = false)
+    private data class WriteRequest(
+        val data: ByteArray?,
+        val isString: Boolean = false,
+        val isEnd: Boolean = false
+    )
 
     // Add reference to RNFSManager and context
     private val reactContext = NitroModules.applicationContext!!
@@ -122,18 +132,21 @@ class Fs2Stream(): HybridFs2StreamSpec() {
             impl.state.job = streamScope.launch {
                 var bytesWritten = 0L
                 try {
-                    while (impl.state.isActive) {
+                    writeLoop@ while (true) {
                         val req = impl.queue.take()
-                        impl.outputStream.write(req.data)
-                        impl.state.position += req.data.size
-                        bytesWritten += req.data.size
-                        writeStreamProgressListeners[streamId]?.invoke(
-                            WriteStreamProgressEvent(
-                                streamId = streamId,
-                                bytesWritten = bytesWritten,
-                                lastChunkSize = req.data.size.toLong()
+                        if (req.isEnd) break@writeLoop
+                        req.data?.let { data ->
+                            impl.outputStream.write(data)
+                            impl.state.position += data.size
+                            bytesWritten += data.size
+                            writeStreamProgressListeners[streamId]?.invoke(
+                                WriteStreamProgressEvent(
+                                    streamId = streamId,
+                                    bytesWritten = bytesWritten,
+                                    lastChunkSize = data.size.toLong()
+                                )
                             )
-                        )
+                        }
                     }
                 } catch (e: Exception) {
                     writeStreamErrorListeners[streamId]?.invoke(
@@ -144,7 +157,10 @@ class Fs2Stream(): HybridFs2StreamSpec() {
                         )
                     )
                 } finally {
-                    try { impl.outputStream.close() } catch (_: Exception) {}
+                    try {
+                        impl.outputStream.close()
+                    } catch (_: Exception) {
+                    }
                     impl.state.isActive = false
                 }
             }
@@ -155,7 +171,8 @@ class Fs2Stream(): HybridFs2StreamSpec() {
     // --- Read Stream Control ---
     override fun startReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val state = readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+            val state =
+                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             if (state.isActive) return@async
             state.isActive = true
             if (state.job == null) {
@@ -249,7 +266,8 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     override fun pauseReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val state = readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+            val state =
+                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             if (!state.isActive) return@async
             if (!state.pauseMutex.isLocked) state.pauseMutex.lock()
             state.isActive = false
@@ -258,7 +276,8 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     override fun resumeReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val state = readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+            val state =
+                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             if (state.isActive) return@async
             if (state.pauseMutex.isLocked) state.pauseMutex.unlock()
             state.isActive = true
@@ -267,7 +286,8 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     override fun closeReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val state = readStreams.remove(streamId) ?: throw Exception("ENOENT: No such read stream: $streamId")
+            val state = readStreams.remove(streamId)
+                ?: throw Exception("ENOENT: No such read stream: $streamId")
             state.job?.cancel()
             readStreamDataListeners.remove(streamId)
             readStreamProgressListeners.remove(streamId)
@@ -278,19 +298,33 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     override fun isReadStreamActive(streamId: String): Promise<Boolean> {
         return Promise.async {
-            val state = readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+            val state =
+                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             return@async state.isActive
         }
     }
 
     // --- Write Stream Control ---
     override fun writeToStream(streamId: String, data: ArrayBuffer): Promise<Unit> {
+        val copiedBuffer: ArrayBuffer
+        try {
+            // Create a copy of the ArrayBuffer to ensure we have ownership
+            copiedBuffer = ArrayBuffer.copy(data)
+        } catch (e: Exception) {
+            // If copying fails, reject immediately
+            return Promise.rejected(Exception("Failed to copy ArrayBuffer: ${e.message}"))
+        }
+
         return Promise.async {
-            val impl = writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+            val impl =
+                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
             if (!impl.state.isActive) throw Exception("EPIPE: Write stream is not active: $streamId")
-            val bytes = data.getBuffer(true).let { buf ->
+            val bytes = copiedBuffer.getBuffer(true).let { buf ->
                 if (buf.hasArray()) {
-                    buf.array().copyOfRange(buf.arrayOffset() + buf.position(), buf.arrayOffset() + buf.limit())
+                    buf.array().copyOfRange(
+                        buf.arrayOffset() + buf.position(),
+                        buf.arrayOffset() + buf.limit()
+                    )
                 } else {
                     ByteArray(buf.remaining()).also { buf.get(it) }
                 }
@@ -302,19 +336,18 @@ class Fs2Stream(): HybridFs2StreamSpec() {
 
     override fun flushWriteStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val impl = writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+            val impl =
+                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
             impl.outputStream.flush()
         }
     }
 
     override fun closeWriteStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val impl = writeStreams.remove(streamId) ?: throw Exception("ENOENT: No such write stream: $streamId")
+            val impl = writeStreams.remove(streamId)
+                ?: throw Exception("ENOENT: No such write stream: $streamId")
             impl.state.job?.cancel()
             impl.outputStream.close()
-            writeStreamProgressListeners.remove(streamId)
-            writeStreamFinishListeners.remove(streamId)
-            writeStreamErrorListeners.remove(streamId)
             writeStreamFinishListeners[streamId]?.invoke(
                 WriteStreamFinishEvent(
                     streamId = streamId,
@@ -322,20 +355,65 @@ class Fs2Stream(): HybridFs2StreamSpec() {
                     success = true
                 )
             )
+            writeStreamProgressListeners.remove(streamId)
+            writeStreamFinishListeners.remove(streamId)
+            writeStreamErrorListeners.remove(streamId)
         }
     }
 
     override fun isWriteStreamActive(streamId: String): Promise<Boolean> {
         return Promise.async {
-            val impl = writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+            val impl =
+                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
             return@async impl.state.isActive
         }
     }
 
     override fun getWriteStreamPosition(streamId: String): Promise<Long> {
         return Promise.async {
-            val impl = writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+            val impl =
+                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
             return@async impl.state.position
+        }
+    }
+
+    override fun endWriteStream(streamId: String): Promise<Unit> {
+        return Promise.async {
+            val impl =
+                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+
+            // Mark the stream as finished (no more writes)
+            impl.state.isActive = false
+
+            // Enqueue an 'end' marker to unblock the write job
+            impl.queue.add(WriteRequest(null, isEnd = true))
+
+            // Wait for the background job to finish
+            impl.state.job?.join()
+
+            // Now cleanup (remove from map, close file, emit finish)
+            writeStreams.remove(streamId)
+
+            try {
+                impl.outputStream.flush()
+            } catch (_: Exception) {
+            }
+            try {
+                impl.outputStream.close()
+            } catch (_: Exception) {
+            }
+
+            writeStreamFinishListeners[streamId]?.invoke(
+                WriteStreamFinishEvent(
+                    streamId = streamId,
+                    bytesWritten = impl.state.position,
+                    success = true
+                )
+            )
+
+            writeStreamProgressListeners.remove(streamId)
+            writeStreamFinishListeners.remove(streamId)
+            writeStreamErrorListeners.remove(streamId)
         }
     }
 

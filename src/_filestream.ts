@@ -1,37 +1,52 @@
 import { NitroModules } from 'react-native-nitro-modules';
 import type { Fs2Stream } from './nitro/Fs2Stream.nitro';
 import type {
+  ReadStreamHandle as ReadStreamHandleNitro,
+  WriteStreamHandle as WriteStreamHandleNitro,
+  ReadStreamDataEvent as ReadStreamDataEventNitro,
+  ReadStreamProgressEvent as ReadStreamProgressEventNitro,
+  ReadStreamEndEvent as ReadStreamEndEventNitro,
+  ReadStreamErrorEvent,
+  WriteStreamProgressEvent as WriteStreamProgressEventNitro,
+  WriteStreamFinishEvent as WriteStreamFinishEventNitro,
+  WriteStreamErrorEvent,
+} from './nitro/Fs2Stream.nitro';
+import {
+  normalizeFilePath,
+  encodeContents,
+  decodeContents,
+  convertFs2StreamOptionsToNitroOptions,
+  convertFs2StreamEventResultsToNitro,
+  convertFs2StreamEventResultsToPlain,
+} from './utils';
+import type {
+  Encoding,
   ReadStreamOptions,
   WriteStreamOptions,
-  ReadStreamHandle,
-  WriteStreamHandle,
   ReadStreamDataEvent,
   ReadStreamProgressEvent,
   ReadStreamEndEvent,
-  ReadStreamErrorEvent,
   WriteStreamProgressEvent,
   WriteStreamFinishEvent,
-  WriteStreamErrorEvent,
-} from './nitro/Fs2Stream.nitro';
-import { normalizeFilePath, encodeContents, decodeContents } from './utils';
-import type { Encoding } from './types';
+} from './types';
 
 /**
  * Re-export stream types for external use
  */
 export type {
+  ReadStreamErrorEvent,
+  WriteStreamErrorEvent,
+} from './nitro/Fs2Stream.nitro';
+
+export type {
   ReadStreamOptions,
   WriteStreamOptions,
-  ReadStreamHandle,
-  WriteStreamHandle,
   ReadStreamDataEvent,
   ReadStreamProgressEvent,
   ReadStreamEndEvent,
-  ReadStreamErrorEvent,
   WriteStreamProgressEvent,
   WriteStreamFinishEvent,
-  WriteStreamErrorEvent,
-} from './nitro/Fs2Stream.nitro';
+} from './types';
 
 // Re-export standard encoding type for convenience
 export type { Encoding } from './types';
@@ -45,7 +60,7 @@ const RNFS2StreamNitro =
 /**
  * Enhanced ReadStreamHandle with control methods
  */
-export interface ExtendedReadStreamHandle extends ReadStreamHandle {
+export interface ExtendedReadStreamHandle extends ReadStreamHandleNitro {
   start(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -56,12 +71,20 @@ export interface ExtendedReadStreamHandle extends ReadStreamHandle {
 /**
  * Enhanced WriteStreamHandle with control methods
  */
-export interface ExtendedWriteStreamHandle extends WriteStreamHandle {
+export interface ExtendedWriteStreamHandle extends WriteStreamHandleNitro {
   write(data: ArrayBuffer): Promise<void>;
   flush(): Promise<void>;
   close(): Promise<void>;
   isActive(): Promise<boolean>;
-  getPosition(): Promise<bigint>;
+  getPosition(): Promise<number>;
+  end(): Promise<void>;
+}
+
+async function getWriteStreamPositionAsNumber(
+  streamId: string
+): Promise<number> {
+  const pos = await RNFS2StreamNitro.getWriteStreamPosition(streamId);
+  return Number(pos);
 }
 
 /**
@@ -72,9 +95,10 @@ export async function createReadStream(
   options?: ReadStreamOptions
 ): Promise<ExtendedReadStreamHandle> {
   const normalizedPath = normalizeFilePath(path);
+
   const handle = await RNFS2StreamNitro.createReadStream(
     normalizedPath,
-    options
+    convertFs2StreamOptionsToNitroOptions(options ?? {})
   );
 
   return {
@@ -97,7 +121,7 @@ export async function createWriteStream(
   const normalizedPath = normalizeFilePath(path);
   const handle = await RNFS2StreamNitro.createWriteStream(
     normalizedPath,
-    options
+    convertFs2StreamOptionsToNitroOptions(options ?? {})
   );
 
   return {
@@ -107,7 +131,8 @@ export async function createWriteStream(
     flush: () => RNFS2StreamNitro.flushWriteStream(handle.streamId),
     close: () => RNFS2StreamNitro.closeWriteStream(handle.streamId),
     isActive: () => RNFS2StreamNitro.isWriteStreamActive(handle.streamId),
-    getPosition: () => RNFS2StreamNitro.getWriteStreamPosition(handle.streamId),
+    getPosition: () => getWriteStreamPositionAsNumber(handle.streamId),
+    end: () => RNFS2StreamNitro.endWriteStream(handle.streamId),
   };
 }
 
@@ -118,7 +143,13 @@ export function listenToReadStreamData(
   streamId: string,
   onData: (event: ReadStreamDataEvent) => void
 ): () => void {
-  return RNFS2StreamNitro.listenToReadStreamData(streamId, onData);
+  const onDataNitro = (event: ReadStreamDataEventNitro) => {
+    const eventPlain = convertFs2StreamEventResultsToPlain(event);
+
+    onData(eventPlain as ReadStreamDataEvent);
+  };
+
+  return RNFS2StreamNitro.listenToReadStreamData(streamId, onDataNitro);
 }
 
 /**
@@ -128,7 +159,12 @@ export function listenToReadStreamProgress(
   streamId: string,
   onProgress: (event: ReadStreamProgressEvent) => void
 ): () => void {
-  return RNFS2StreamNitro.listenToReadStreamProgress(streamId, onProgress);
+  const onProgressNitro = (event: ReadStreamProgressEventNitro) => {
+    const eventPlain = convertFs2StreamEventResultsToPlain(event);
+    onProgress(eventPlain as ReadStreamProgressEvent);
+  };
+
+  return RNFS2StreamNitro.listenToReadStreamProgress(streamId, onProgressNitro);
 }
 
 /**
@@ -138,7 +174,12 @@ export function listenToReadStreamEnd(
   streamId: string,
   onEnd: (event: ReadStreamEndEvent) => void
 ): () => void {
-  return RNFS2StreamNitro.listenToReadStreamEnd(streamId, onEnd);
+  const onEndNitro = (event: ReadStreamEndEventNitro) => {
+    const eventPlain = convertFs2StreamEventResultsToPlain(event);
+    onEnd(eventPlain as ReadStreamEndEvent);
+  };
+
+  return RNFS2StreamNitro.listenToReadStreamEnd(streamId, onEndNitro);
 }
 
 /**
@@ -158,7 +199,15 @@ export function listenToWriteStreamProgress(
   streamId: string,
   onProgress: (event: WriteStreamProgressEvent) => void
 ): () => void {
-  return RNFS2StreamNitro.listenToWriteStreamProgress(streamId, onProgress);
+  const onProgressNitro = (event: WriteStreamProgressEventNitro) => {
+    const eventPlain = convertFs2StreamEventResultsToPlain(event);
+    onProgress(eventPlain as WriteStreamProgressEvent);
+  };
+
+  return RNFS2StreamNitro.listenToWriteStreamProgress(
+    streamId,
+    onProgressNitro
+  );
 }
 
 /**
@@ -168,7 +217,12 @@ export function listenToWriteStreamFinish(
   streamId: string,
   onFinish: (event: WriteStreamFinishEvent) => void
 ): () => void {
-  return RNFS2StreamNitro.listenToWriteStreamFinish(streamId, onFinish);
+  const onFinishNitro = (event: WriteStreamFinishEventNitro) => {
+    const eventPlain = convertFs2StreamEventResultsToPlain(event);
+    onFinish(eventPlain as WriteStreamFinishEvent);
+  };
+
+  return RNFS2StreamNitro.listenToWriteStreamFinish(streamId, onFinishNitro);
 }
 
 /**
@@ -228,7 +282,7 @@ export async function readStream(
   filePath: string,
   encoding: Encoding = 'arraybuffer'
 ): Promise<string | ArrayBuffer> {
-  const stream = await createReadStream(filePath);
+  const stream = await createReadStream(filePath, { bufferSize: 128 });
   let content: string | ArrayBuffer =
     encoding === 'arraybuffer' ? new ArrayBuffer(0) : '';
 
@@ -298,7 +352,7 @@ export async function writeStream(
       typeof data === 'string' ? encodeContents(data, encoding) : data;
     stream
       .write(buffer)
-      .then(() => stream.close())
+      .then(() => stream.end())
       .catch(reject);
   });
 }
@@ -396,8 +450,16 @@ export async function processFileInChunks(
     const unsubscribeData = listenToReadStreamData(
       stream.streamId,
       async (event) => {
+        const eventNitro = convertFs2StreamEventResultsToNitro(
+          event
+        ) as ReadStreamDataEventNitro;
+
         try {
-          await chunkProcessor(event.data, event.chunk, event.position);
+          await chunkProcessor(
+            eventNitro.data,
+            eventNitro.chunk,
+            eventNitro.position
+          );
         } catch (error) {
           unsubscribeData();
           unsubscribeEnd();
