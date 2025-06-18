@@ -1,6 +1,13 @@
 import { Buffer } from 'buffer';
 
-import type { Encoding, EncodingOrOptions } from './types';
+import type {
+  Encoding,
+  EncodingOrOptions,
+  DataEventPlain,
+  DataEventNitro,
+  StreamOptionPlain,
+  StreamOptionNitro,
+} from './types';
 
 /**
  * Encodes content to ArrayBuffer based on encoding type
@@ -129,4 +136,74 @@ export function parseOptions(encodingOrOptions?: EncodingOrOptions): {
     options = { ...options, ...encodingOrOptions };
   }
   return options;
+}
+
+/**
+ * Convert number to bigint
+ */
+export function numberToBigInt(number: number): bigint {
+  return BigInt(number);
+}
+
+/**
+ * Convert bigint to number
+ */
+export function bigIntToNumber(bigint: bigint): number {
+  return Number(bigint);
+}
+
+/**
+ * Map FS2 stream options with bigint
+ */
+export const mapPropsWithBigInt: string[] = [
+  'start',
+  'end',
+  'chunks',
+  'position',
+  'bytesRead',
+  'totalBytes',
+  'bytesWritten',
+  'lastChunkSize',
+];
+
+/**
+ * Convert FS2 stream options to nitro options
+ */
+export function convertFs2StreamOptionsToNitroOptions(
+  options: StreamOptionPlain
+): StreamOptionNitro {
+  return Object.fromEntries(
+    Object.entries(options).map(([key, value]) => [
+      key,
+      mapPropsWithBigInt.includes(key) ? numberToBigInt(value) : value,
+    ])
+  ) as StreamOptionNitro;
+}
+
+/**
+ * Convert FS2 stream event results to nitro event results
+ */
+export function convertFs2StreamEventResultsToNitro(
+  results: DataEventPlain
+): DataEventNitro {
+  return Object.fromEntries(
+    Object.entries(results).map(([key, value]) => [
+      key,
+      mapPropsWithBigInt.includes(key) ? numberToBigInt(value) : value,
+    ])
+  ) as DataEventNitro;
+}
+
+/**
+ * Convert FS2 stream event results to plain options
+ */
+export function convertFs2StreamEventResultsToPlain(
+  results: DataEventNitro
+): DataEventPlain {
+  return Object.fromEntries(
+    Object.entries(results).map(([key, value]) => [
+      key,
+      mapPropsWithBigInt.includes(key) ? bigIntToNumber(value) : value,
+    ])
+  ) as DataEventPlain;
 }

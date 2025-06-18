@@ -90,6 +90,7 @@ export interface Fs2Stream
   closeWriteStream(streamId: string): Promise<void>;
   isWriteStreamActive(streamId: string): Promise<boolean>;
   getWriteStreamPosition(streamId: string): Promise<bigint>;
+  endWriteStream(streamId: string): Promise<void>;
 
   // Stream Event Listeners
   listenToReadStreamData(
