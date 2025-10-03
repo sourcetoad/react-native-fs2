@@ -50,7 +50,9 @@ const Example = () => {
       setResult(runStatus);
     } catch (err) {
       console.log(err);
-      setResult('Error Running Example: ' + err);
+      setResult(
+        (currentResult) => currentResult + '\n- Error Running Example: ' + err
+      );
     } finally {
       setRunningAction(false);
     }

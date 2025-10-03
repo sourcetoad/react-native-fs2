@@ -17,7 +17,14 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/sourcetoad/react-native-fs2.git", :tag => "v#{s.version}" }
   s.resource_bundles = { 'RNFS_PrivacyInfo' => 'ios/PrivacyInfo.xcprivacy' }
-  s.source_files = "ios/**/*.{h,m,mm,swift}"
+  s.source_files = [
+    "ios/**/*.{swift}",
+    "ios/**/*.{m,mm}",
+    "cpp/**/*.{hpp,cpp}",
+  ]
+
+  s.dependency 'React-jsi'
+  s.dependency 'React-callinvoker'
 
   load 'nitrogen/generated/ios/RNFS2+autolinking.rb'
   add_nitrogen_files(s)
