@@ -43,6 +43,10 @@ class Fs2Stream: HybridFs2StreamSpec {
   private var readStreams: [String: ReadStreamState] = [:]
   private var writeStreams: [String: WriteStreamState] = [:]
 
+  // MARK: - Buffer Pool
+
+  private let bufferPool = BufferPool()
+
   // MARK: - Event Listener Maps
 
   private var readStreamDataListeners: [String: (ReadStreamDataEvent) -> Void] = [:]
@@ -59,10 +63,10 @@ class Fs2Stream: HybridFs2StreamSpec {
     return Promise.async {
       let fileURL = URL(fileURLWithPath: path)
       guard FileManager.default.fileExists(atPath: fileURL.path) else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: File does not exist: \(path)"])
+        throw StreamError.notFound(path: path)
       }
       guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EOPEN: Could not open file: \(path)"])
+        throw StreamError.accessDenied(path: path)
       }
       let streamId = UUID().uuidString
       let state = ReadStreamState(fileHandle: fileHandle, options: options)
@@ -85,7 +89,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
 
       guard let fileHandle = try? FileHandle(forWritingTo: fileURL) else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EOPEN: Could not open file: \(path)"])
+        throw StreamError.accessDenied(path: path)
       }
 
       if append {
@@ -115,7 +119,11 @@ class Fs2Stream: HybridFs2StreamSpec {
             try state.fileHandle.write(contentsOf: data)
 
             state.position += Int64(data.count)
-            self.writeStreamProgressListeners[streamId]?(WriteStreamProgressEvent(streamId: streamId, bytesWritten: state.position, lastChunkSize: Int64(data.count)))
+            self.writeStreamProgressListeners[streamId]?(WriteStreamProgressEvent(
+              streamId: streamId,
+              bytesWritten: state.position,
+              lastChunkSize: Int64(data.count)
+            ))
 
             if state.shouldFlush {
               try? state.fileHandle.synchronize()
@@ -129,12 +137,28 @@ class Fs2Stream: HybridFs2StreamSpec {
             }
           }
         } catch {
-          self.writeStreamErrorListeners[streamId]?(WriteStreamErrorEvent(streamId: streamId, error: error.localizedDescription, code: nil))
+          self.writeStreamErrorListeners[streamId]?(WriteStreamErrorEvent(
+            streamId: streamId,
+            error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
+            code: nil
+          ))
           state.isActive = false
         }
-        
-        self.writeStreamFinishListeners[streamId]?(WriteStreamFinishEvent(streamId: streamId, bytesWritten: state.position, success: true))
+
+        // Cleanup: remove from map, sync and close file, emit finish event, cleanup listeners
         self.writeStreams.removeValue(forKey: streamId)
+        try? state.fileHandle.synchronize()
+        try? state.fileHandle.close()
+
+        self.writeStreamFinishListeners[streamId]?(WriteStreamFinishEvent(
+          streamId: streamId,
+          bytesWritten: state.position,
+          success: true
+        ))
+
+        self.writeStreamProgressListeners.removeValue(forKey: streamId)
+        self.writeStreamFinishListeners.removeValue(forKey: streamId)
+        self.writeStreamErrorListeners.removeValue(forKey: streamId)
       }
       return WriteStreamHandle(streamId: streamId)
     }
@@ -145,7 +169,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func startReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.readStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such read stream: \(streamId)"])
+        throw StreamError.invalidStream(streamId: streamId)
       }
 
       if state.isActive { return }
@@ -153,7 +177,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       state.isActive = true
       state.isPaused = false
 
-      let bufferSize = Int(state.options?.bufferSize ?? 8192)
+      let bufferSize = Int(state.options?.bufferSize ?? Double(BufferPool.defaultBufferSize))
       let start = state.options?.start ?? 0
       let end = state.options?.end
       var position = start
@@ -189,38 +213,76 @@ class Fs2Stream: HybridFs2StreamSpec {
             } else {
               bytesToRead = bufferSize
             }
-            let data = try state.fileHandle.read(upToCount: bytesToRead) ?? Data()
-            if data.isEmpty {
+
+            // Use buffer pool - read directly into buffer
+            var buffer = self.bufferPool.acquire(requestedSize: bytesToRead)
+            defer { self.bufferPool.release(buffer) }
+
+            let bytesRead = try buffer.withUnsafeMutableBytes { bufferPtr -> Int in
+              guard let baseAddress = bufferPtr.baseAddress else { return 0 }
+              let fd = state.fileHandle.fileDescriptor
+              let result = Darwin.read(fd, baseAddress, bytesToRead)
+              guard result >= 0 else {
+                throw StreamError.ioError(message: String(cString: strerror(errno)))
+              }
+              return result
+            }
+
+            if bytesRead == 0 {
               break
             }
+
+            let data = buffer.prefix(bytesRead)
             let arrayBuffer = try ArrayBufferHolder.copy(data: data)
 
-            self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(streamId: streamId, data: arrayBuffer, chunk: chunk, position: position))
+            self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(
+              streamId: streamId,
+              data: arrayBuffer,
+              chunk: chunk,
+              position: position
+            ))
 
-            position += Int64(data.count)
+            position += Int64(bytesRead)
             state.position = position
-            bytesReadTotal += Int64(data.count)
+            bytesReadTotal += Int64(bytesRead)
             chunk += 1
 
-            self.readStreamProgressListeners[streamId]?(ReadStreamProgressEvent(streamId: streamId, bytesRead: bytesReadTotal, totalBytes: fileLength, progress: fileLength > 0 ? Double(bytesReadTotal) / Double(fileLength) : 0))
+            self.readStreamProgressListeners[streamId]?(ReadStreamProgressEvent(
+              streamId: streamId,
+              bytesRead: bytesReadTotal,
+              totalBytes: fileLength,
+              progress: fileLength > 0 ? Double(bytesReadTotal) / Double(fileLength) : 0
+            ))
 
             if let end = end, position > end {
               break
             }
           }
 
-          self.readStreamEndListeners[streamId]?(ReadStreamEndEvent(streamId: streamId, bytesRead: bytesReadTotal, success: true))
+          self.readStreamEndListeners[streamId]?(ReadStreamEndEvent(
+            streamId: streamId,
+            bytesRead: bytesReadTotal,
+            success: true
+          ))
         } catch {
-          self.readStreamErrorListeners[streamId]?(ReadStreamErrorEvent(streamId: streamId, error: error.localizedDescription, code: nil))
+          self.readStreamErrorListeners[streamId]?(ReadStreamErrorEvent(
+            streamId: streamId,
+            error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
+            code: nil
+          ))
         }
 
         state.isActive = false
         state.task = nil
-        self.readStreams.removeValue(forKey: streamId)
-        self.readStreamDataListeners.removeValue(forKey: streamId)
-        self.readStreamProgressListeners.removeValue(forKey: streamId)
-        self.readStreamEndListeners.removeValue(forKey: streamId)
-        self.readStreamErrorListeners.removeValue(forKey: streamId)
+
+        // Only cleanup if stream wasn't already removed by closeReadStream
+        if self.readStreams.removeValue(forKey: streamId) != nil {
+          try? state.fileHandle.close()
+          self.readStreamDataListeners.removeValue(forKey: streamId)
+          self.readStreamProgressListeners.removeValue(forKey: streamId)
+          self.readStreamEndListeners.removeValue(forKey: streamId)
+          self.readStreamErrorListeners.removeValue(forKey: streamId)
+        }
       }
     }
   }
@@ -228,10 +290,12 @@ class Fs2Stream: HybridFs2StreamSpec {
   func pauseReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.readStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such read stream: \(streamId)"])
+        throw StreamError.invalidStream(streamId: streamId)
       }
       if !state.isActive { return }
       state.isPaused = true
+      // Finish the old continuation to prevent memory leak
+      state.pauseStreamContinuation?.finish()
       // Pause by setting up a new pauseStream
       let (pauseStream, pauseContinuation) = AsyncStream<Void>.makeStream()
       state.pauseStream = pauseStream
@@ -242,9 +306,17 @@ class Fs2Stream: HybridFs2StreamSpec {
   func resumeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.readStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such read stream: \(streamId)"])
+        throw StreamError.invalidStream(streamId: streamId)
       }
-      if state.isActive && !state.isPaused { return }
+
+      // Only resume if stream is paused
+      if !state.isPaused { return }
+
+      // Validate that stream has been started and has a pause continuation
+      guard state.task != nil, state.pauseStreamContinuation != nil else {
+        throw StreamError.ioError(message: "Cannot resume: stream not started or not properly paused")
+      }
+
       // Resume by yielding to the pauseStream
       state.isPaused = false
       state.pauseStreamContinuation?.yield(())
@@ -255,10 +327,19 @@ class Fs2Stream: HybridFs2StreamSpec {
   func closeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.readStreams.removeValue(forKey: streamId) else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such read stream: \(streamId)"])
+        throw StreamError.invalidStream(streamId: streamId)
       }
+
+      // Cancel and wait for task to finish before closing file handle
+      state.isActive = false
       state.task?.cancel()
+      if let task = state.task {
+        _ = await task.result
+      }
+
       try? state.fileHandle.close()
+
+      // Cleanup listeners (task's finally block will skip this since stream was removed)
       self.readStreamDataListeners.removeValue(forKey: streamId)
       self.readStreamProgressListeners.removeValue(forKey: streamId)
       self.readStreamEndListeners.removeValue(forKey: streamId)
@@ -269,7 +350,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func isReadStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
     return Promise.async {
       guard let state = self.readStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such read stream: \(streamId)"])
+        throw StreamError.invalidStream(streamId: streamId)
       }
       return state.isActive
     }
@@ -291,10 +372,14 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
 
       if !state.isActive { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write stream is not active: \(streamId)"]) }
-      let data = copiedBuffer.toData(copyIfNeeded: true)
 
+      // Check if task is cancelled BEFORE yielding data to prevent data loss
+      if let task = state.task, task.isCancelled {
+        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write job is not active"])
+      }
+
+      let data = copiedBuffer.toData(copyIfNeeded: true)
       state.writeBufferContinuation?.yield((data, false))
-      if let task = state.task, task.isCancelled { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write job is not active"]) }
     }
   }
 
@@ -356,18 +441,6 @@ class Fs2Stream: HybridFs2StreamSpec {
       if let task = state.task {
         _ = await task.result
       }
-
-      // Now cleanup (remove from map, close file, emit finish)
-      self.writeStreams.removeValue(forKey: streamId)
-      try? state.fileHandle.synchronize()
-      try? state.fileHandle.close()
-      state.isActive = false
-
-      self.writeStreamFinishListeners[streamId]?(WriteStreamFinishEvent(streamId: streamId, bytesWritten: state.position, success: true))
-
-      self.writeStreamProgressListeners.removeValue(forKey: streamId)
-      self.writeStreamFinishListeners.removeValue(forKey: streamId)
-      self.writeStreamErrorListeners.removeValue(forKey: streamId)
     }
   }
 

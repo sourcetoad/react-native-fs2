@@ -4,8 +4,11 @@ import com.margelo.nitro.NitroModules
 import com.margelo.nitro.core.Promise
 import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.fs2.utils.Fs2Util
+import com.margelo.nitro.fs2.utils.BufferPool
+import com.margelo.nitro.fs2.utils.StreamError
 
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
@@ -34,7 +37,8 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         val options: WriteStreamOptions?,
         var isActive: Boolean = false,
         var position: Long = 0L,
-        var job: Job? = null
+        var job: Job? = null,
+        var hasError: Boolean = false
     )
 
     // Stream handle maps
@@ -68,33 +72,64 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     // Add reference to RNFSManager and context
     private val reactContext = NitroModules.applicationContext!!
 
+    // Add buffer pool instance
+    private val bufferPool = BufferPool()
+
     // Helper to open InputStream for reading (file or content URI)
     private fun openInputStream(path: String, start: Long = 0L): InputStream {
         val uri = Fs2Util.getFileUri(path)
-        return if ("content" == uri.scheme) {
-            val input = reactContext.contentResolver.openInputStream(uri)
-                ?: throw Exception("ENOENT: Could not open input stream for $path")
-            if (start > 0) input.skip(start)
-            input
-        } else {
-            val raf = RandomAccessFile(Fs2Util.getOriginalFilepath(reactContext, path), "r")
-            raf.seek(start)
-            object : InputStream() {
-                override fun read(): Int = raf.read()
-                override fun read(b: ByteArray, off: Int, len: Int): Int = raf.read(b, off, len)
-                override fun close() = raf.close()
+        try {
+            if ("content" == uri.scheme) {
+                val input = reactContext.contentResolver.openInputStream(uri)
+                    ?: throw StreamError.NotFound(path)
+                if (start > 0) input.skip(start)
+                return input
+            } else {
+                val filePath = Fs2Util.getOriginalFilepath(reactContext, path)
+                val file = File(filePath)
+                if (!file.canRead()) throw StreamError.AccessDenied(path)
+                val raf = RandomAccessFile(filePath, "r")
+                raf.seek(start)
+                return object : InputStream() {
+                    override fun read(): Int = raf.read()
+                    override fun read(b: ByteArray, off: Int, len: Int): Int = raf.read(b, off, len)
+                    override fun close() = raf.close()
+                }
             }
+        } catch (e: SecurityException) {
+            throw StreamError.AccessDenied(path)
+        } catch (e: IOException) {
+            throw StreamError.IOError(e.message ?: "I/O error")
         }
     }
 
     // Helper to open OutputStream for writing (file or content URI)
     private fun openOutputStream(path: String, append: Boolean): OutputStream {
         val uri = Fs2Util.getFileUri(path)
-        return if ("content" == uri.scheme) {
-            reactContext.contentResolver.openOutputStream(uri, if (append) "wa" else "w")
-                ?: throw Exception("ENOENT: Could not open output stream for $path")
-        } else {
-            FileOutputStream(Fs2Util.getOriginalFilepath(reactContext, path), append)
+        try {
+            if ("content" == uri.scheme) {
+                val output = reactContext.contentResolver.openOutputStream(uri, if (append) "wa" else "w")
+                    ?: throw StreamError.NotFound(path)
+                return output
+            } else {
+                val filePath = Fs2Util.getOriginalFilepath(reactContext, path)
+                val file = File(filePath)
+
+                if (file.exists()) {
+                    if (!file.canWrite()) throw StreamError.AccessDenied(path)
+                } else {
+                    val parentDir = file.parentFile
+                    if (parentDir != null && !parentDir.canWrite()) {
+                        throw StreamError.AccessDenied(path)
+                    }
+                }
+
+                return FileOutputStream(filePath, append)
+            }
+        } catch (e: SecurityException) {
+            throw StreamError.AccessDenied(path)
+        } catch (e: IOException) {
+            throw StreamError.IOError(e.message ?: "I/O error")
         }
     }
 
@@ -105,7 +140,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         return Promise.async {
             val file = File(path)
             if (!file.exists() || !file.isFile) {
-                throw Exception("ENOENT: File does not exist: $path")
+                throw StreamError.NotFound(path)
             }
             val streamId = UUID.randomUUID().toString()
             val state = ReadStreamState(file, options)
@@ -148,11 +183,34 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                             )
                         }
                     }
-                } catch (e: Exception) {
+                } catch (e: SecurityException) {
+                    impl.state.hasError = true
                     writeStreamErrorListeners[streamId]?.invoke(
                         WriteStreamErrorEvent(
                             streamId = streamId,
-                            error = e.message ?: "Unknown error",
+                            error = StreamError.AccessDenied(state.file.path).message ?: "Access denied",
+                            code = null
+                        )
+                    )
+                } catch (e: IOException) {
+                    impl.state.hasError = true
+                    writeStreamErrorListeners[streamId]?.invoke(
+                        WriteStreamErrorEvent(
+                            streamId = streamId,
+                            error = StreamError.IOError(e.message ?: "I/O error").message ?: "I/O error",
+                            code = null
+                        )
+                    )
+                } catch (e: Exception) {
+                    impl.state.hasError = true
+                    val error = when (e) {
+                        is StreamError -> e
+                        else -> StreamError.IOError(e.message ?: "Unknown error")
+                    }
+                    writeStreamErrorListeners[streamId]?.invoke(
+                        WriteStreamErrorEvent(
+                            streamId = streamId,
+                            error = error.message ?: "Unknown error",
                             code = null
                         )
                     )
@@ -172,12 +230,14 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun startReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val state =
-                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+                readStreams[streamId] ?: throw StreamError.InvalidStream(streamId)
             if (state.isActive) return@async
             state.isActive = true
-            if (state.job == null) {
+
+            // Only create new job if none exists or previous one is completed
+            if (state.job == null || state.job?.isActive == false) {
                 state.job = streamScope.launch {
-                    val bufferSize = state.options?.bufferSize ?: 8192
+                    val bufferSize = state.options?.bufferSize ?: BufferPool.DEFAULT_BUFFER_SIZE
                     val start = state.options?.start ?: 0L
                     val end = state.options?.end
                     var position = start
@@ -187,23 +247,24 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     try {
                         state.position = position
                         openInputStream(state.file.path, start).use { inputStream ->
-                            val buffer = ByteArray(bufferSize.toInt())
-                            readLoop@ while (true) {
-                                var shouldBreak = false
-                                state.pauseMutex.withLock {
+                            var buffer = bufferPool.acquire(bufferSize.toInt())
+                            try {
+                                readLoop@ while (true) {
+                                    // Wait if paused - acquire lock briefly to check, then suspend if needed
+                                    state.pauseMutex.withLock {
+                                        // Just checking pause state, lock will be released after this block
+                                    }
+
+                                    // Perform I/O without holding the lock
                                     val bytesToRead = if (end != null) {
                                         val remaining = end - position + 1
-                                        if (remaining <= 0) {
-                                            shouldBreak = true
-                                            return@withLock
-                                        }
+                                        if (remaining <= 0) break@readLoop
                                         minOf(bufferSize.toLong(), remaining).toInt()
-                                    } else bufferSize
-                                    val read = inputStream.read(buffer, 0, bytesToRead.toInt())
-                                    if (read == -1) {
-                                        shouldBreak = true
-                                        return@withLock
-                                    }
+                                    } else bufferSize.toInt()
+
+                                    val read = inputStream.read(buffer, 0, bytesToRead)
+                                    if (read == -1) break@readLoop
+
                                     val data = buffer.copyOf(read)
 
                                     readStreamDataListeners[streamId]?.invoke(
@@ -219,6 +280,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                     state.position = position
                                     bytesReadTotal += read
                                     chunk++
+
                                     readStreamProgressListeners[streamId]?.invoke(
                                         ReadStreamProgressEvent(
                                             streamId = streamId,
@@ -227,12 +289,11 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                             progress = bytesReadTotal.toDouble() / fileLength.toDouble()
                                         )
                                     )
-                                    if (end != null && position > end) {
-                                        shouldBreak = true
-                                        return@withLock
-                                    }
+
+                                    if (end != null && position > end) break@readLoop
                                 }
-                                if (shouldBreak) break@readLoop
+                            } finally {
+                                bufferPool.release(buffer)
                             }
                         }
                         readStreamEndListeners[streamId]?.invoke(
@@ -242,11 +303,33 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                 success = true
                             )
                         )
-                    } catch (e: Exception) {
+                    } catch (e: SecurityException) {
+                        val error = StreamError.AccessDenied(state.file.path)
                         readStreamErrorListeners[streamId]?.invoke(
                             ReadStreamErrorEvent(
                                 streamId = streamId,
-                                error = e.message ?: "Unknown error",
+                                error = error.message ?: "Access denied",
+                                code = null
+                            )
+                        )
+                    } catch (e: IOException) {
+                        val error = StreamError.IOError(e.message ?: "I/O error")
+                        readStreamErrorListeners[streamId]?.invoke(
+                            ReadStreamErrorEvent(
+                                streamId = streamId,
+                                error = error.message ?: "I/O error",
+                                code = null
+                            )
+                        )
+                    } catch (e: Exception) {
+                        val error = when (e) {
+                            is StreamError -> e
+                            else -> StreamError.IOError(e.message ?: "Unknown error")
+                        }
+                        readStreamErrorListeners[streamId]?.invoke(
+                            ReadStreamErrorEvent(
+                                streamId = streamId,
+                                error = error.message ?: "Unknown error",
                                 code = null
                             )
                         )
@@ -269,7 +352,9 @@ class Fs2Stream() : HybridFs2StreamSpec() {
             val state =
                 readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             if (!state.isActive) return@async
-            if (!state.pauseMutex.isLocked) state.pauseMutex.lock()
+
+            // Use tryLock to avoid deadlock - locks mutex to pause stream
+            state.pauseMutex.tryLock()
             state.isActive = false
         }
     }
@@ -279,7 +364,15 @@ class Fs2Stream() : HybridFs2StreamSpec() {
             val state =
                 readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
             if (state.isActive) return@async
-            if (state.pauseMutex.isLocked) state.pauseMutex.unlock()
+
+            // Safely unlock mutex to resume stream - check if locked first
+            if (state.pauseMutex.isLocked) {
+                try {
+                    state.pauseMutex.unlock()
+                } catch (e: IllegalStateException) {
+                    // Mutex might have been unlocked by another coroutine, ignore
+                }
+            }
             state.isActive = true
         }
     }
@@ -308,17 +401,14 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun writeToStream(streamId: String, data: ArrayBuffer): Promise<Unit> {
         val copiedBuffer: ArrayBuffer
         try {
-            // Create a copy of the ArrayBuffer to ensure we have ownership
             copiedBuffer = ArrayBuffer.copy(data)
         } catch (e: Exception) {
-            // If copying fails, reject immediately
-            return Promise.rejected(Exception("Failed to copy ArrayBuffer: ${e.message}"))
+            return Promise.rejected(StreamError.BufferError("Failed to copy ArrayBuffer: ${e.message}"))
         }
 
         return Promise.async {
-            val impl =
-                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
-            if (!impl.state.isActive) throw Exception("EPIPE: Write stream is not active: $streamId")
+            val impl = writeStreams[streamId] ?: throw StreamError.InvalidStream(streamId)
+            if (!impl.state.isActive) throw StreamError.StreamInactive(streamId)
             val bytes = copiedBuffer.getBuffer(true).let { buf ->
                 if (buf.hasArray()) {
                     buf.array().copyOfRange(
@@ -330,7 +420,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                 }
             }
             impl.queue.add(WriteRequest(bytes))
-            impl.state.job?.let { if (!it.isActive) throw Exception("EPIPE: Write job is not active") }
+            impl.state.job?.let { if (!it.isActive) throw StreamError.StreamInactive(streamId) }
         }
     }
 
@@ -344,17 +434,28 @@ class Fs2Stream() : HybridFs2StreamSpec() {
 
     override fun closeWriteStream(streamId: String): Promise<Unit> {
         return Promise.async {
-            val impl = writeStreams.remove(streamId)
-                ?: throw Exception("ENOENT: No such write stream: $streamId")
-            impl.state.job?.cancel()
-            impl.outputStream.close()
+            val impl = writeStreams.remove(streamId) ?: throw StreamError.InvalidStream(streamId)
+
+            // Signal end to prevent new writes and wait for pending writes to complete
+            impl.state.isActive = false
+            impl.queue.add(WriteRequest(null, isEnd = true))
+
+            // Wait for background job to finish processing
+            impl.state.job?.join()
+
+            try {
+                impl.outputStream.close()
+            } catch (_: Exception) {
+            }
+
             writeStreamFinishListeners[streamId]?.invoke(
                 WriteStreamFinishEvent(
                     streamId = streamId,
                     bytesWritten = impl.state.position,
-                    success = true
+                    success = !impl.state.hasError
                 )
             )
+
             writeStreamProgressListeners.remove(streamId)
             writeStreamFinishListeners.remove(streamId)
             writeStreamErrorListeners.remove(streamId)
@@ -407,7 +508,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                 WriteStreamFinishEvent(
                     streamId = streamId,
                     bytesWritten = impl.state.position,
-                    success = true
+                    success = !impl.state.hasError
                 )
             )
 
