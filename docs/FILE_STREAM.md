@@ -31,8 +31,8 @@ Creates a read stream for efficiently reading large files in chunks.
 ```typescript
 interface ReadStreamOptions {
   bufferSize?: number;      // Buffer size in bytes (default: 4096)
-  start?: bigint;           // Start position in bytes (default: 0)
-  end?: bigint;            // End position in bytes (default: file end)
+  start?: number;           // Start position in bytes (default: 0)
+  end?: number;             // End position in bytes (default: file end)
 }
 ```
 
@@ -93,20 +93,20 @@ function listenToReadStreamProgress(
 interface ReadStreamDataEvent {
   streamId: string;
   data: ArrayBuffer;     // Raw data chunk
-  chunk: bigint;         // Chunk number (0-based)
-  position: bigint;      // Current position in file
+  chunk: number;         // Chunk number (0-based)
+  position: number;      // Current position in file
 }
 
 interface ReadStreamProgressEvent {
   streamId: string;
-  bytesRead: bigint;     // Total bytes read so far
-  totalBytes: bigint;    // Total file size
+  bytesRead: number;     // Total bytes read so far
+  totalBytes: number;    // Total file size
   progress: number;      // Progress as percentage (0-100)
 }
 
 interface ReadStreamEndEvent {
   streamId: string;
-  bytesRead: bigint;     // Total bytes read
+  bytesRead: number;     // Total bytes read
   success: boolean;
 }
 
@@ -208,21 +208,24 @@ interface WriteStreamOptions {
 ```typescript
 interface WriteStreamHandle {
   streamId: string;
-  
+
   // Write data chunk to stream
   write(data: ArrayBuffer): Promise<void>;
-  
+
   // Flush any buffered data
   flush(): Promise<void>;
-  
+
   // Close the stream and finish writing
   close(): Promise<void>;
-  
+
   // Check if stream is active
   isActive(): Promise<boolean>;
-  
+
   // Get current write position
-  getPosition(): Promise<bigint>;
+  getPosition(): Promise<number>;
+
+  // End the stream (alias for close)
+  end(): Promise<void>;
 }
 ```
 
@@ -253,13 +256,13 @@ function listenToWriteStreamError(
 ```typescript
 interface WriteStreamProgressEvent {
   streamId: string;
-  bytesWritten: bigint;    // Total bytes written so far
-  lastChunkSize: bigint;   // Size of last written chunk
+  bytesWritten: number;    // Total bytes written so far
+  lastChunkSize: number;   // Size of last written chunk
 }
 
 interface WriteStreamFinishEvent {
   streamId: string;
-  bytesWritten: bigint;    // Total bytes written
+  bytesWritten: number;    // Total bytes written
   success: boolean;
 }
 
