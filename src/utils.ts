@@ -25,19 +25,19 @@ export function encodeContents(
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for utf8 encoding');
       }
-      return Buffer.from(content, 'utf8').buffer;
+      return Buffer.from(content, 'utf8').buffer as ArrayBuffer;
 
     case 'ascii':
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for ascii encoding');
       }
-      return Buffer.from(content, 'ascii').buffer;
+      return Buffer.from(content, 'ascii').buffer as ArrayBuffer;
 
     case 'base64':
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for base64 encoding');
       }
-      return Buffer.from(content, 'base64').buffer;
+      return Buffer.from(content, 'base64').buffer as ArrayBuffer;
 
     case 'arraybuffer':
       if (content instanceof ArrayBuffer) {
