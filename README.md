@@ -1,6 +1,8 @@
 # react-native-fs2
 _A fork of [react-native-fs](https://github.com/itinance/react-native-fs) with a smaller footprint and fixes due to the upstream library seemingly being abandoned._
 
+**Now powered by [Nitro Modules](https://github.com/mrousavy/nitro)** for superior performance and type safety! 🚀
+
 ### Why the fork?
 This library intentional or not has become critical to the success of our mobile applications. We've noticed a few things that led to this fork:
 
@@ -18,18 +20,41 @@ We debated a few paths, but we felt it best to fork the project and make some ma
 
 We will continue to support this library for as long as we use it.
 
+## Features
+
+- 🚀 **High Performance**: Powered by Nitro Modules with direct JSI bindings
+- 📁 **File System Operations**: Complete file system access (read, write, copy, move, etc.)
+- 🌊 **File Streaming** (Beta): Efficiently handle large files with streaming API
+- 📱 **MediaStore Support**: Android MediaStore integration for media files
+- ⬇️ **Downloads**: Background downloads with progress tracking
+- 🔒 **Type Safe**: Full TypeScript support with end-to-end type safety
+- 🎯 **Cross Platform**: iOS and Android support
+
 ### Installation
 ```bash
 npm i --save react-native-fs2
+# Peer dependency required
+npm i --save react-native-nitro-modules
 ```
 
 #### Supported React Native Versions
 | react-native-fs2 | react-native |
 |------------------|--------------|
+| 4.x (nitro)      | >=0.80       |
 | 3.0.x            | >=0.69       |
 
 ### Changelog
 Changes can be found in [CHANGELOG.md](CHANGELOG.md)
+
+### What's New in 4.x
+
+- **Nitro Modules Architecture**: Complete rewrite using Nitro Modules for superior performance
+- **File Streaming API**: New streaming capabilities for large file operations (see [FILE_STREAM.md](./docs/FILE_STREAM.md))
+- **Better Type Safety**: End-to-end type safety from TypeScript to native code
+- **ArrayBuffer Built-in**: Native ArrayBuffer support without additional dependencies
+- **Backward Compatible API**: Most existing code works without changes!
+
+> **Note**: v4.x requires `react-native-nitro-modules` as a peer dependency. See migration notes below.
 
 ## Usage
 ```ts
@@ -114,15 +139,15 @@ await RNFS.completeHandler('JobID')
 // readDir(dirPath: string): Promise<ReadDirItem[]>
 const dirItems = await RNFS.readDir('DirPath')
 ```
-* Retuns an `array` of `ReadDirItem` which are items that are present in the directory
+* Returns an `array` of `ReadDirItem` which are items that are present in the directory
 * `ReadDirItem`
-  * ctime: `Date | undefined` -> The creation date of the file (iOS only)
-  * mtime: `Date | undefined` -> The last modified date of the file
+  * ctime: `number | undefined` -> The creation timestamp in milliseconds (iOS only)
+  * mtime: `number` -> The last modified timestamp in milliseconds
   * name: `string` -> The name of the item
   * path: `string` -> The absolute path to the item
   * size: `number` -> Size in bytes
-  * isFile: () => `boolean` -> Is the file just a file?
-  * isDirectory: () => `boolean` -> Is the file a directory?
+  * isFile: `boolean` -> Is the item a file?
+  * isDirectory: `boolean` -> Is the item a directory?
 
 
 ### `readFile`
@@ -134,8 +159,7 @@ const fileData = await RNFS.readFile('DirPath', 'utf8')
 * Optionally includes `EncodingOrOptions` with values:
   * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
   * ...fileoptions
-* Note: `arraybuffer` requires [react-native-blob-jsi-helper](https://github.com/mrousavy/react-native-blob-jsi-helper)
-  * `npm i react-native-blob-jsi-helper` or `yarn add react-native-blob-jsi-helper`
+* Note: `arraybuffer` support is built-in via Nitro Modules (no additional dependencies required)
 
 ### `read`
 ```ts
@@ -202,13 +226,13 @@ await RNFS.write('FileToWrite', 'ContentsToWrite', -1, 'utf8')
 // stat(filepath: string): Promise<StatResult>
 const fileStats = await RNFS.stat('FilePath')
 ```
-* Retuns an `array` of `StatResult` which are `statistics` of the `file`
+* Returns a `StatResult` object with statistics of the file
 * `StatResult`
   * path: `string` -> The same as filepath argument
-  * ctime: `date` -> The creation date of the file
-  * mtime: `date` -> The last modified date of the file
+  * ctime: `number` -> The creation timestamp in milliseconds
+  * mtime: `number` -> The last modified timestamp in milliseconds
   * size: `number` -> Size in bytes
-  * mode: `number` -> UNIX file mode
+  * mode: `number` -> UNIX file mode (iOS only)
   * originalFilepath: `string` -> Android: In case of content uri this is the pointed file path, otherwise is the same as path
   * isFile: () => `boolean` -> Is the file just a file?
   * isDirectory: () => `boolean` -> Is the file a directory?
@@ -262,7 +286,7 @@ if (await RNFS.isResumable('JobID')) {
     RNFS.resumeDownload('JobID')
 }
 ```
-* Check if the download job with this ID is resumable.
+* Check if the the download job with this ID is resumable.
 
 ### `touch`
 ```ts
@@ -278,13 +302,75 @@ await RNFS.scanFile('FilePath', Date, Date)
 ```
 * Scan the file using [Media Scanner](https://developer.android.com/reference/android/media/MediaScannerConnection).
 
-----
+# File Streaming API (Beta)
+
+React-native-fs2 now provides powerful file streaming capabilities for efficiently reading and writing large files without loading entire content into memory.
+
+### `createReadStream`
+```ts
+import { createReadStream, listenToReadStreamData, listenToReadStreamProgress, listenToReadStreamEnd } from 'react-native-fs2';
+
+const stream = await createReadStream('/path/to/large-file.dat', {
+  bufferSize: 8192 // 8KB chunks
+});
+
+// Listen for data chunks
+const unsubData = listenToReadStreamData(stream.streamId, (event) => {
+  console.log(`Chunk ${event.chunk}: ${event.data.byteLength} bytes`);
+});
+
+// Listen for progress
+const unsubProgress = listenToReadStreamProgress(stream.streamId, (event) => {
+  console.log(`Progress: ${event.progress * 100}%`);
+});
+
+// Listen for completion
+const unsubEnd = listenToReadStreamEnd(stream.streamId, (event) => {
+  console.log('Stream finished');
+  unsubData();
+  unsubProgress();
+  unsubEnd();
+});
+
+await stream.start();
+```
+
+### `createWriteStream`
+```ts
+import { createWriteStream, listenToWriteStreamProgress, listenToWriteStreamFinish } from 'react-native-fs2';
+
+const stream = await createWriteStream('/path/to/output-file.dat', {
+  append: false,
+  createDirectories: true
+});
+
+// Listen for progress
+const unsubProgress = listenToWriteStreamProgress(stream.streamId, (event) => {
+  console.log(`Written: ${event.bytesWritten} bytes`);
+});
+
+// Listen for completion
+const unsubFinish = listenToWriteStreamFinish(stream.streamId, (event) => {
+  console.log('Write completed:', event.bytesWritten, 'bytes');
+  unsubProgress();
+  unsubFinish();
+});
+
+// Write data in chunks
+await stream.write(chunk1);
+await stream.write(chunk2);
+await stream.close();
+```
+
+**For complete streaming API documentation, see [FILE_STREAM.md](./docs/FILE_STREAM.md)**
 
 # MediaStore
-_RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore._
 
-* Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
-* This feature is only available on Android targeting API 29 or higher. And may require the following permissions:
+### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore. 
+
+### Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
+
+### This feature is only available on Android targeting API 29 or higher. And may require the following permissions:
 
 ```xml
 <!-- Required only if your app needs to access images or photos that other apps created. -->
@@ -308,11 +394,11 @@ _RNFS2 can now interact with the MediaStore on Android. This allows you to add, 
 * Creates a new media file in the MediaStore with the given `mimeType`. This will not create a file on the filesystem, but will create a reference in the MediaStore.
 
 ```ts
-// createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
+// createMediaFile(fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
 
-const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await RNFS.MediaStore.createMediaFile(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE)
 ```
 
 ### `updateMediaFile`
@@ -320,12 +406,12 @@ const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.M
 * Updates the media file in the MediaStore
 
 ```ts
-// updateMediaFile(uri: string, fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
+// updateMediaFile(uri: string, fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
 
 const contentURI = 'content://media/external/images/media/123'
-const fileDescriptor = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescriptor, RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescription, RNFS.MediaStore.MEDIA_IMAGE)
 ```
 
 ### `writeToMediaFile`
@@ -343,11 +429,11 @@ await RNFS.MediaStore.writeToMediaFile('content://media/external/images/media/12
 * Copies the file at `filepath` to the MediaStore with the given `mimeType`.
 
 ```ts
-// copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaCollections, path: string): Promise<string>
+// copyToMediaStore(fileDescription: FileDescription, mediatype: MediaCollections, path: string): Promise<string>
 
-const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
+const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
 ```
 
 ### `queryMediaStore`
@@ -355,22 +441,25 @@ const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.
 * Queries the MediaStore for media files with the given `searchOptions`.
 
 ```ts
-// queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult>
+// queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile | undefined>
 
-await RNFS.MediaStore.queryMediaStore({
+// Query by URI
+const result = await RNFS.MediaStore.queryMediaStore({
   uri: 'content://media/external/images/media/123',
-  fileName: ''
-  relativePath: ''
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE
 })
 
-// or
-await RNFS.MediaStore.queryMediaStore({
-  uri: '',
-  fileName: 'image.png'
-  relativePath: 'MyAppFolder'
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+// or query by filename and path
+const result = await RNFS.MediaStore.queryMediaStore({
+  fileName: 'image.png',
+  relativePath: 'MyAppFolder',
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE
 })
+
+// result will be MediaStoreFile or undefined if not found
+if (result) {
+  console.log(result.uri, result.name, result.size)
+}
 ```
 
 ### `deleteFromMediaStore`
@@ -383,9 +472,9 @@ await RNFS.MediaStore.queryMediaStore({
 await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
 ```
 
-## FileDescriptor
+## FileDescription
 ```ts
-type FileDescriptor = {
+type FileDescription = {
   name: string;
   parentFolder: string;
   mimeType: string
@@ -395,17 +484,23 @@ type FileDescriptor = {
 ## MediaStoreSearchOptions
 ```ts
 type MediaStoreSearchOptions = {
-  uri: string;
-  fileName: string;
-  relativePath: string;
+  uri?: string;
+  fileName?: string;
+  relativePath?: string;
   mediaType: MediaCollections
 };
 ```
 
-## MediaStoreQueryResult
+## MediaStoreFile
 ```ts
-type MediaStoreQueryResult = {
-  contentUri: string;
+type MediaStoreFile = {
+  uri: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dateAdded?: bigint;
+  dateModified?: bigint;
+  relativePath?: string;
 };
 ```
 
@@ -433,3 +528,82 @@ type MediaStoreQueryResult = {
 #### iOS
  * `LibraryDirectoryPath` - Absolute path to [NSLibraryDirectory](https://developer.apple.com/documentation/foundation/nssearchpathdirectory/nslibrarydirectory)
  * `MainBundlePath` - Absolute path to main bundle directory.
+
+## Migrating from v3.x to v4.x
+
+The v4.x release brings significant improvements with minimal breaking changes. Most apps can upgrade with little to no code changes!
+
+### Installation
+
+1. **Install peer dependency:**
+```bash
+npm install react-native-nitro-modules
+# or
+yarn add react-native-nitro-modules
+```
+
+2. **Update react-native-fs2:**
+```bash
+npm install react-native-fs2@latest
+# or
+yarn add react-native-fs2@latest
+```
+
+### Breaking Changes
+
+#### Timestamps are now numbers
+The only significant breaking change is that timestamps are now returned as numbers (milliseconds since epoch) instead of Date objects:
+
+```typescript
+// v3.x
+const items = await RNFS.readDir(path);
+const date = items[0].mtime; // Date object
+
+// v4.x
+const items = await RNFS.readDir(path);
+const timestamp = items[0].mtime; // number
+const date = new Date(items[0].mtime); // Convert to Date if needed
+```
+
+This affects:
+- `readDir()` - `ctime` and `mtime` fields
+- `stat()` - `ctime` and `mtime` fields
+
+### What Still Works
+
+✅ **All core file operations** - No changes required:
+```typescript
+await RNFS.readFile(path, 'utf8');
+await RNFS.writeFile(path, content, 'utf8');
+await RNFS.copyFile(src, dest);
+await RNFS.moveFile(src, dest);
+await RNFS.unlink(path);
+// ... all other operations work the same!
+```
+
+✅ **Download API** - Backward compatible:
+```typescript
+const { jobId, promise } = RNFS.downloadFile({
+  fromUrl: url,
+  toFile: path,
+  begin: (res) => { },
+  progress: (res) => { }
+});
+```
+
+✅ **MediaStore** (Android) - Works the same
+
+### New Features to Explore
+
+Once migrated, you can optionally explore:
+
+- **File Streaming API**: For efficient large file operations (see [FILE_STREAM.md](./docs/FILE_STREAM.md))
+- **Better Performance**: Automatic via Nitro Modules architecture
+- **Enhanced Type Safety**: Full TypeScript support throughout
+
+### Need Help?
+
+If you encounter issues during migration:
+1. Check the [CHANGELOG.md](./CHANGELOG.md) for detailed changes
+2. Review [FILE_STREAM.md](./docs/FILE_STREAM.md) for streaming API
+3. Open an issue on [GitHub](https://github.com/sourcetoad/react-native-fs2/issues)

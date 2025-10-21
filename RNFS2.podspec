@@ -1,24 +1,33 @@
-require 'json'
-pjson = JSON.parse(File.read('package.json'))
+require "json"
+
+package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
-  s.name            = "RNFS2"
-  s.version         = pjson["version"]
-  s.homepage        = "https://github.com/sourcetoad/react-native-fs2"
-  s.summary         = pjson["description"]
-  s.license         = pjson["license"]
+  s.name         = "RNFS2"
+  s.version      = package["version"]
+  s.summary      = package["description"]
+  s.homepage     = package["homepage"]
+  s.license      = package["license"]
   s.authors         = {
     "Johannes Lumpe" => "johannes@lum.pe",
     "Hagen Hübel" => "hhuebel@itinance.com",
     "Connor Tumbleson" => "connor@sourcetoad.com"
   }
 
-  s.ios.deployment_target = '12.4'
-
-  s.source          = { :git => "https://github.com/sourcetoad/react-native-fs2", :tag => "v#{s.version}" }
+  s.platforms    = { :ios => min_ios_version_supported }
+  s.source       = { :git => "https://github.com/sourcetoad/react-native-fs2.git", :tag => "v#{s.version}" }
   s.resource_bundles = { 'RNFS_PrivacyInfo' => 'ios/PrivacyInfo.xcprivacy' }
-  s.source_files    = "ios/*.{h,m}"
-  s.preserve_paths  = "src/*.{js,ts}"
+  s.source_files = [
+    "ios/**/*.{swift}",
+    "ios/**/*.{m,mm}",
+    "cpp/**/*.{hpp,cpp}",
+  ]
 
-  s.dependency 'React-Core'
+  s.dependency 'React-jsi'
+  s.dependency 'React-callinvoker'
+
+  load 'nitrogen/generated/ios/RNFS2+autolinking.rb'
+  add_nitrogen_files(s)
+
+ install_modules_dependencies(s)
 end

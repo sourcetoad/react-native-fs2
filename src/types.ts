@@ -1,25 +1,19 @@
-export type MkdirOptions = {
-  NSURLIsExcludedFromBackupKey?: boolean; // iOS only
-  NSFileProtectionKey?: string; // iOS only
-};
+import type {
+  ReadStreamOptions as ReadStreamOptionsNitro,
+  WriteStreamOptions as WriteStreamOptionsNitro,
+  ReadStreamDataEvent as ReadStreamDataEventNitro,
+  ReadStreamProgressEvent as ReadStreamProgressEventNitro,
+  ReadStreamEndEvent as ReadStreamEndEventNitro,
+  WriteStreamProgressEvent as WriteStreamProgressEventNitro,
+  WriteStreamFinishEvent as WriteStreamFinishEventNitro,
+} from './nitro/Fs2Stream.nitro';
 
-export type FileOptions = {
-  NSFileProtectionKey?: string; // iOS only
-};
-
-export type ReadDirItem = {
-  ctime: Date | undefined; // The creation date of the file (iOS only)
-  mtime: Date | undefined; // The last modified date of the file
-  name: string; // The name of the item
-  path: string; // The absolute path to the item
-  size: number; // Size in bytes
-  isFile: () => boolean; // Is the file just a file?
-  isDirectory: () => boolean; // Is the file a directory?
-};
+export type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
+export type EncodingOrOptions = Encoding | { encoding?: Encoding };
 
 export type StatResult = {
-  type: any; // TODO
-  name: string | undefined; // The name of the item
+  type?: any; // TODO
+  name?: string; // The name of the item
   path: string; // The absolute path to the item
   size: number; // Size in bytes
   mode: number; // UNIX file mode
@@ -30,73 +24,67 @@ export type StatResult = {
   isDirectory: () => boolean; // Is the file a directory?
 };
 
-export type Headers = { [name: string]: string };
-export type Fields = { [name: string]: string };
+export interface ReadStreamOptions {
+  bufferSize?: number;
+  start?: number;
+  end?: number;
+}
 
-export type DownloadFileOptions = {
-  fromUrl: string; // URL to download file from
-  toFile: string; // Local filesystem path to save the file to
-  headers?: Headers; // An object of headers to be passed to the server
-  background?: boolean; // Continue the download in the background after the app terminates (iOS only)
-  discretionary?: boolean; // Allow the OS to control the timing and speed of the download to improve perceived performance  (iOS only)
-  cacheable?: boolean; // Whether the download can be stored in the shared NSURLCache (iOS only)
-  progressInterval?: number;
-  progressDivider?: number;
-  begin?: (res: DownloadBeginCallbackResult) => void; // Note: it is required when progress prop provided
-  progress?: (res: DownloadProgressCallbackResult) => void;
-  resumable?: () => void; // only supported on iOS
-  connectionTimeout?: number; // only supported on Android
-  readTimeout?: number; // supported on Android and iOS
-  backgroundTimeout?: number; // Maximum time (in milliseconds) to download an entire resource (iOS only, useful for timing out background downloads)
-};
+export interface WriteStreamOptions {
+  append?: boolean;
+  bufferSize?: number;
+  createDirectories?: boolean;
+}
 
-export type DownloadBeginCallbackResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  statusCode: number; // The HTTP status code
-  contentLength: number; // The total size in bytes of the download resource
-  headers: Headers; // The HTTP response headers from the server
-};
+// Stream event types
+export interface ReadStreamDataEvent {
+  streamId: string;
+  data: ArrayBuffer;
+  chunk: number;
+  position: number;
+}
 
-export type DownloadProgressCallbackResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  contentLength: number; // The total size in bytes of the download resource
-  bytesWritten: number; // The number of bytes written to the file so far
-};
+export interface ReadStreamProgressEvent {
+  streamId: string;
+  bytesRead: number;
+  totalBytes: number;
+  progress: number;
+}
 
-export type DownloadResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  statusCode: number; // The HTTP status code
-  bytesWritten: number; // The number of bytes written to the file
-};
+export interface ReadStreamEndEvent {
+  streamId: string;
+  bytesRead: number;
+  success: boolean;
+}
 
-export type DownloadFileResult = {
-  jobId: number;
-  promise: Promise<DownloadResult>;
-};
+export interface WriteStreamProgressEvent {
+  streamId: string;
+  bytesWritten: number;
+  lastChunkSize: number;
+}
 
-export type FSInfoResult = {
-  totalSpace: number; // The total amount of storage space on the device (in bytes).
-  freeSpace: number; // The amount of available storage space on the device (in bytes).
-};
+export interface WriteStreamFinishEvent {
+  streamId: string;
+  bytesWritten: number;
+  success: boolean;
+}
 
-export type FileDescriptor = {
-  name: string;
-  parentFolder: string;
-  mimeType: string;
-};
+export type DataEventPlain =
+  | ReadStreamDataEvent
+  | ReadStreamProgressEvent
+  | ReadStreamEndEvent
+  | WriteStreamProgressEvent
+  | WriteStreamFinishEvent;
 
-export type MediaStoreSearchOptions = {
-  uri: string;
-  fileName: string;
-  relativePath: string;
-  mediaType: MediaCollections;
-};
+export type DataEventNitro =
+  | ReadStreamDataEventNitro
+  | ReadStreamProgressEventNitro
+  | ReadStreamEndEventNitro
+  | WriteStreamProgressEventNitro
+  | WriteStreamFinishEventNitro;
 
-export type MediaStoreQueryResult = {
-  contentUri: string;
-};
+export type StreamOptionPlain = ReadStreamOptions | WriteStreamOptions;
 
-export type Encoding = 'utf8' | 'base64' | 'ascii' | 'arraybuffer';
-export type EncodingOrOptions = Encoding | Record<string, any>;
-export type ProcessedOptions = Record<string, any | Encoding>;
-export type MediaCollections = 'Audio' | 'Image' | 'Video' | 'Download';
+export type StreamOptionNitro =
+  | ReadStreamOptionsNitro
+  | WriteStreamOptionsNitro;
