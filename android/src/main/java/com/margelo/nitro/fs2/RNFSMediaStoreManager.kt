@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.FileUtils
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.net.toUri
@@ -131,11 +132,7 @@ class RNFSMediaStoreManager {
                         // Implement transformation logic if needed
                         out.write(bytes) // No transformation in this version
                     } else {
-                        val buf = ByteArray(BUFFER_SIZE)
-                        var read: Int
-                        while (fin.read(buf).also { read = it } > 0) {
-                            out.write(buf, 0, read)
-                        }
+                        FileUtils.copy(fin, out)
                     }
                 }
             }
