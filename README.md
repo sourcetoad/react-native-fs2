@@ -394,11 +394,11 @@ await stream.close();
 * Creates a new media file in the MediaStore with the given `mimeType`. This will not create a file on the filesystem, but will create a reference in the MediaStore.
 
 ```ts
-// createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
+// createMediaFile(fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
 
-const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await RNFS.MediaStore.createMediaFile(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE)
 ```
 
 ### `updateMediaFile`
@@ -406,12 +406,12 @@ const contentURI = await RNFS.MediaStore.createMediaFile(fileDescriptor,  RNFS.M
 * Updates the media file in the MediaStore
 
 ```ts
-// updateMediaFile(uri: string, fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string>
+// updateMediaFile(uri: string, fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
 
 const contentURI = 'content://media/external/images/media/123'
-const fileDescriptor = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescriptor, RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescription, RNFS.MediaStore.MEDIA_IMAGE)
 ```
 
 ### `writeToMediaFile`
@@ -429,11 +429,11 @@ await RNFS.MediaStore.writeToMediaFile('content://media/external/images/media/12
 * Copies the file at `filepath` to the MediaStore with the given `mimeType`.
 
 ```ts
-// copyToMediaStore(fileDescriptor: filedescriptor, mediatype: MediaCollections, path: string): Promise<string>
+// copyToMediaStore(fileDescription: FileDescription, mediatype: MediaCollections, path: string): Promise<string>
 
-const fileDescriptor = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
+const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
+const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
 ```
 
 ### `queryMediaStore`
@@ -441,22 +441,25 @@ const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescriptor,  RNFS.
 * Queries the MediaStore for media files with the given `searchOptions`.
 
 ```ts
-// queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult>
+// queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile | undefined>
 
-await RNFS.MediaStore.queryMediaStore({
+// Query by URI
+const result = await RNFS.MediaStore.queryMediaStore({
   uri: 'content://media/external/images/media/123',
-  fileName: ''
-  relativePath: ''
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE
 })
 
-// or
-await RNFS.MediaStore.queryMediaStore({
-  uri: '',
-  fileName: 'image.png'
-  relativePath: 'MyAppFolder'
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE;
+// or query by filename and path
+const result = await RNFS.MediaStore.queryMediaStore({
+  fileName: 'image.png',
+  relativePath: 'MyAppFolder',
+  mediaType: RNFS.MediaStore.MEDIA_IMAGE
 })
+
+// result will be MediaStoreFile or undefined if not found
+if (result) {
+  console.log(result.uri, result.name, result.size)
+}
 ```
 
 ### `deleteFromMediaStore`
@@ -469,29 +472,35 @@ await RNFS.MediaStore.queryMediaStore({
 await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
 ```
 
-## FileDescriptor
+## FileDescription
 ```ts
-type FileDescriptor = { 
-  name: string; 
-  parentFolder: string; 
-  mimeType: string 
+type FileDescription = {
+  name: string;
+  parentFolder: string;
+  mimeType: string
 };
 ```
 
 ## MediaStoreSearchOptions
 ```ts
-type MediaStoreSearchOptions = { 
-  uri: string; 
-  fileName: string; 
-  relativePath: string; 
-  mediaType: MediaCollections 
+type MediaStoreSearchOptions = {
+  uri?: string;
+  fileName?: string;
+  relativePath?: string;
+  mediaType: MediaCollections
 };
 ```
 
-## MediaStoreQueryResult
+## MediaStoreFile
 ```ts
-type MediaStoreQueryResult = { 
-  contentUri: string;
+type MediaStoreFile = {
+  uri: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dateAdded?: bigint;
+  dateModified?: bigint;
+  relativePath?: string;
 };
 ```
 
