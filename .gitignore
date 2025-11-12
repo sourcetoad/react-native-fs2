@@ -29,6 +29,7 @@ android/*.iml
 android/local.properties
 android/.settings
 android/.project
+.kotlin/
 Session.vim
 
 

@@ -13,6 +13,7 @@
       android:allowBackup="false"
       android:requestLegacyExternalStorage="true"
       android:theme="@style/AppTheme"
+      android:usesCleartextTraffic="${usesCleartextTraffic}"
       android:supportsRtl="true">
       <activity
         android:name=".MainActivity"
