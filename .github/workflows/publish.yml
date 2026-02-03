@@ -2,6 +2,9 @@ name: Publish to NPM
 on:
   release:
     types: [published]
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   publish:
@@ -10,10 +13,10 @@ jobs:
 
     name: Publish
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: 'npm'
@@ -24,5 +27,3 @@ jobs:
 
       - name: Publish (NPM)
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
