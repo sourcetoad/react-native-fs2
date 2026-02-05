@@ -28,10 +28,12 @@ import com.facebook.react.module.annotations.ReactModule;
 import com.rnfs2.Utils.FileDescription;
 import com.rnfs2.Utils.MediaStoreQuery;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -185,14 +187,10 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       return;
     }
 
-    try {
-      File srcFile = new File(path);
-      if (!srcFile.exists()) {
-        promise.reject("RNFS2.copyToMediaStore", "No such file ('" + path + "')");
-        return;
-      }
-    } catch (Exception e) {
-      promise.reject("RNFS2.copyToMediaStore", "Error accessing source file: " + e.getMessage(), e);
+    try (InputStream testStream = getSourceInputStream(path)) {
+      // source exists and is readable - continue
+    } catch (IOException e) {
+      promise.reject("ENOENT", "Source not accessible: " + path);
       return;
     }
 
@@ -346,6 +344,23 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
     }
   }
 
+  private Uri getSourceUri(String path) {
+    Uri uri = Uri.parse(path);
+    if (uri.getScheme() == null) {
+      uri = Uri.parse("file://" + path);
+    }
+    return uri;
+  }
+
+  private InputStream getSourceInputStream(String path) throws IOException {
+    Uri uri = getSourceUri(path);
+    InputStream stream = reactContext.getContentResolver().openInputStream(uri);
+    if (stream == null) {
+      throw new IOException("Could not open input stream for: " + path);
+    }
+    return stream;
+  }
+
   private boolean writeToMediaFile(Uri fileUri, String filePath, boolean transformFile, boolean shouldCleanupOnFailure, Promise promise, ReactApplicationContext ctx) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       Context appCtx = ctx.getApplicationContext();
@@ -358,30 +373,38 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
           return false;
         }
 
-        File src = new File(filePath);
-        if (!src.exists()) {
-          promise.reject("ENOENT", "No such file ('" + filePath + "')");
+        InputStream sourceStream;
+        try {
+          sourceStream = getSourceInputStream(filePath);
+        } catch (IOException e) {
+          promise.reject("ENOENT", "Source not accessible: " + filePath);
           return false;
         }
 
         ParcelFileDescriptor descr = appCtx.getContentResolver().openFileDescriptor(fileUri, "w");
         if (descr == null) {
+          sourceStream.close();
           promise.reject("RNFS2.createMediaFile", "Failed to open file descriptor");
           return false;
         }
 
-        try (descr; FileInputStream fin = new FileInputStream(src); FileOutputStream out = new FileOutputStream(descr.getFileDescriptor())) {
+        try (sourceStream; descr; FileOutputStream out = new FileOutputStream(descr.getFileDescriptor())) {
           if (transformFile) {
-            int length = (int) src.length();
-            byte[] bytes = new byte[length];
-            fin.read(bytes);
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = sourceStream.read(chunk)) != -1) {
+              buffer.write(chunk, 0, bytesRead);
+            }
+            byte[] bytes = buffer.toByteArray();
+
             if (RNFSFileTransformer.sharedFileTransformer == null) {
               throw new IllegalStateException("Write to media file with transform was specified but the shared file transformer is not set");
             }
             byte[] transformedBytes = RNFSFileTransformer.sharedFileTransformer.onWriteFile(bytes);
             out.write(transformedBytes);
           } else {
-            FileUtils.copy(fin, out);
+            FileUtils.copy(sourceStream, out);
           }
         }
 
