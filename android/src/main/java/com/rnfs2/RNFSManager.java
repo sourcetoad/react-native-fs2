@@ -1,10 +1,14 @@
 package com.rnfs2;
 
+import android.content.ContentResolver;
+import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.StatFs;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.util.SparseArray;
 import android.media.MediaScannerConnection;
@@ -362,6 +366,15 @@ public class RNFSManager extends ReactContextBaseJavaModule {
   @ReactMethod
   public void stat(String filepath, Promise promise) {
     try {
+      Uri uri = Uri.parse(filepath);
+
+      // content:// URI
+      if ("content".equals(uri.getScheme())) {
+        statContentUri(uri, filepath, promise);
+        return;
+      }
+
+      // file:// or plain path
       String originalFilepath = getOriginalFilepath(filepath, true);
       File file = new File(originalFilepath);
 
@@ -375,10 +388,63 @@ public class RNFSManager extends ReactContextBaseJavaModule {
       statMap.putString("originalFilepath", originalFilepath);
 
       promise.resolve(statMap);
+
     } catch (Exception ex) {
       ex.printStackTrace();
       reject(promise, filepath, ex);
     }
+  }
+
+  private void statContentUri(Uri uri, String filepath, Promise promise) throws Exception {
+    ContentResolver resolver = reactContext.getContentResolver();
+    WritableMap statMap = Arguments.createMap();
+
+    long size = -1L;
+    Long lastModified = null;
+
+    // Query for metadata
+    Cursor cursor = resolver.query(uri, null, null, null, null);
+    if (cursor != null) {
+      try {
+        if (cursor.moveToFirst()) {
+          int sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE);
+          if (sizeIdx != -1) {
+            size = cursor.getLong(sizeIdx);
+          }
+
+          int lmIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED);
+          if (lmIdx != -1) {
+            lastModified = cursor.getLong(lmIdx);
+          }
+        }
+      } finally {
+        cursor.close();
+      }
+    }
+
+    // Fallback for size via AssetFileDescriptor
+    if (size < 0) {
+      try (AssetFileDescriptor afd = resolver.openAssetFileDescriptor(uri, "r")) {
+        if (afd != null && afd.getLength() >= 0) {
+          size = afd.getLength();
+        }
+      }
+    }
+
+    // Existence check - throws if file doesn't exist
+    try (InputStream is = resolver.openInputStream(uri)) {
+      if (is == null) throw new Exception("File does not exist");
+    }
+
+    int mtimeSec = lastModified != null ? (int) (lastModified / 1000) : 0;
+
+    statMap.putInt("ctime", mtimeSec);
+    statMap.putInt("mtime", mtimeSec);
+    statMap.putDouble("size", size >= 0 ? (double) size : 0);
+    statMap.putInt("type", 0); // content URIs are files, not directories
+    statMap.putString("originalFilepath", filepath);
+
+    promise.resolve(statMap);
   }
 
   @ReactMethod
