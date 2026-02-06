@@ -3,7 +3,6 @@ import RNFS from 'react-native-fs2';
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   Platform,
   PermissionsAndroid,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {getTestFolder, requestAndroidPermission} from './utils';
 
 /**
@@ -97,6 +97,7 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 35
   },
   sectionContainer: {
     marginTop: 32,
