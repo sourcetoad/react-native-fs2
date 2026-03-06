@@ -11,7 +11,6 @@ const Example = () => {
    * Methods
    */
   const executeExample = async () => {
-    let runStatus = '';
     try {
       // cleanup previous result
       setResult('');
@@ -26,6 +25,7 @@ const Example = () => {
       }
 
       const folder = getTestFolder();
+      let runStatus = '';
 
       // create directory RNFS2Example1Folder
       runStatus = `${runStatus}\n- Creating new directory "RNFS2Example1Folder"`;
@@ -70,7 +70,7 @@ const Example = () => {
       }
     } catch (err) {
       console.log(err);
-      setResult(`${runStatus}\nError Running Example`);
+      setResult('Error Running Example');
     } finally {
       setRunningAction(false);
     }
