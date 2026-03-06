@@ -39,6 +39,7 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @ReactModule(name = RNFSManager.MODULE_NAME)
 public class RNFSManager extends ReactContextBaseJavaModule {
@@ -89,7 +90,7 @@ public class RNFSManager extends ReactContextBaseJavaModule {
   private String getOriginalFilepath(String filepath, boolean isDirectoryAllowed) throws IORejectionException {
     Uri uri = getFileUri(filepath, isDirectoryAllowed);
     String originalFilepath = filepath;
-    if (uri.getScheme().equals("content")) {
+    if (Objects.equals(uri.getScheme(), "content")) {
       try {
         Cursor cursor = reactContext.getContentResolver().query(uri, null, null, null, null);
         if (cursor.moveToFirst()) {
@@ -405,12 +406,9 @@ public class RNFSManager extends ReactContextBaseJavaModule {
     long size = -1L;
     Long lastModified = null;
 
-    // Query for metadata
-    String[] projection = new String[] {
-      OpenableColumns.SIZE,
-      DocumentsContract.Document.COLUMN_LAST_MODIFIED
-    };
-    Cursor cursor = resolver.query(uri, projection, null, null, null);
+    // Query for metadata. Prevent filtering for specific columns as each content resolver
+    // has different columns (ie missing last modified)
+    Cursor cursor = resolver.query(uri, null, null, null, null);
     if (cursor != null) {
       try {
         if (cursor.moveToFirst()) {

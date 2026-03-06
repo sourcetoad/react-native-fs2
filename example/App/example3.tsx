@@ -169,7 +169,7 @@ const Example = () => {
       runStatus = `${runStatus}\n- Stat of copied content URI:`;
       const contentURI2Stat = await RNFS.stat(contentURI2);
       runStatus = `${runStatus}\n- ${JSON.stringify(contentURI2Stat, null, 2)}`;
-      
+
       setResult(runStatus);
     } catch (err) {
       setResult(`${runStatus}\n- Error Running Example`);
