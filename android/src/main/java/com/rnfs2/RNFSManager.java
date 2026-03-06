@@ -13,6 +13,8 @@ import android.util.Base64;
 import android.util.SparseArray;
 import android.media.MediaScannerConnection;
 
+import androidx.annotation.NonNull;
+
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -65,6 +67,7 @@ public class RNFSManager extends ReactContextBaseJavaModule {
     this.reactContext = reactContext;
   }
 
+  @NonNull
   @Override
   public String getName() {
     return MODULE_NAME;
@@ -403,7 +406,11 @@ public class RNFSManager extends ReactContextBaseJavaModule {
     Long lastModified = null;
 
     // Query for metadata
-    Cursor cursor = resolver.query(uri, null, null, null, null);
+    String[] projection = new String[] {
+      OpenableColumns.SIZE,
+      DocumentsContract.Document.COLUMN_LAST_MODIFIED
+    };
+    Cursor cursor = resolver.query(uri, projection, null, null, null);
     if (cursor != null) {
       try {
         if (cursor.moveToFirst()) {
@@ -433,7 +440,7 @@ public class RNFSManager extends ReactContextBaseJavaModule {
 
     // Existence check - throws if file doesn't exist
     try (InputStream is = resolver.openInputStream(uri)) {
-      if (is == null) throw new Exception("File does not exist");
+      if (is == null) throw new FileNotFoundException("File does not exist");
     }
 
     int mtimeSec = lastModified != null ? (int) (lastModified / 1000) : 0;

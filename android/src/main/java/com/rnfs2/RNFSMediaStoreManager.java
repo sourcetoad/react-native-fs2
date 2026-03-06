@@ -13,15 +13,12 @@ import android.provider.MediaStore;
 import android.os.FileUtils;
 import android.util.Log;
 
-import androidx.annotation.RequiresApi;
-
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 
@@ -29,13 +26,10 @@ import com.rnfs2.Utils.FileDescription;
 import com.rnfs2.Utils.MediaStoreQuery;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -199,14 +193,14 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
 
     try {
       FileDescription fileDesc = new FileDescription(filedata.getString("name"), filedata.getString("mimeType"), filedata.getString("parentFolder"));
-      
+
       fileUri = createNewMediaFile(fileDesc, MediaType.valueOf(mediaType), promise, reactContext);
 
       if (fileUri == null) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
              promise.reject("RNFS2.copyToMediaStore", "Failed to create initial media file entry (null URI from createNewMediaFile on Q+).");
         }
-        return; 
+        return;
       }
 
       ContentValues pendingValues = new ContentValues();
@@ -214,7 +208,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
       if (resolver.update(fileUri, pendingValues, null, null) == 0) {
         cleanupMediaStoreEntry(fileUri, resolver);
         promise.reject("RNFS2.copyToMediaStore", "Failed to mark media file as pending (0 rows updated). Original entry cleaned up.");
-        return; 
+        return;
       }
 
       boolean writeSuccessful = writeToMediaFile(fileUri, path, false, true, promise, reactContext);
@@ -223,15 +217,14 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         ContentValues commitValues = new ContentValues();
         commitValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
         if (resolver.update(fileUri, commitValues, null, null) > 0) {
-          promise.resolve(fileUri.toString()); 
+          promise.resolve(fileUri.toString());
         } else {
           cleanupMediaStoreEntry(fileUri, resolver);
           promise.reject("RNFS2.copyToMediaStore", "Failed to commit media file (unmark as pending - 0 rows updated). Entry with data cleaned up.");
         }
       }
       // If writeSuccessful is false, writeToMediaFile has already rejected and handled cleanup.
-
-    } catch (Exception e) { 
+    } catch (Exception e) {
       if (fileUri != null) {
         cleanupMediaStoreEntry(fileUri, resolver);
       }
@@ -418,7 +411,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
         if (shouldCleanupOnFailure) {
           cleanupMediaStoreEntry(fileUri, resolver);
         }
-        
+
         promise.reject("RNFS2.createMediaFile", "Failed to write file: " + e.getMessage());
         return false;
       } finally {
@@ -468,7 +461,7 @@ public class RNFSMediaStoreManager extends ReactContextBaseJavaModule {
           Uri contentUri = Uri.withAppendedPath(mediaURI, String.valueOf(id));
 
           queryResultsMap.putString("contentUri", contentUri.toString());
-          
+
           promise.resolve(queryResultsMap);
         } else {
           promise.resolve(null);
