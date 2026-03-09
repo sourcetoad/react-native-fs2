@@ -26,6 +26,7 @@ npm i --save react-native-fs2
 #### Supported React Native Versions
 | react-native-fs2 | react-native |
 |------------------|--------------|
+| 3.4.x            | >=0.82       |
 | 3.0.x            | >=0.69       |
 
 ### Changelog
