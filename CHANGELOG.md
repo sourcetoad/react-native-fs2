@@ -1,5 +1,8 @@
 # Changelog
 
+# v3.4.2 (March 9, 2025)
+ * [#111](https://github.com/sourcetoad/react-native-fs2/pull/111) - Move CI to Node 24
+
 # v3.4.1 (March 9, 2025)
  * [#109](https://github.com/sourcetoad/react-native-fs2/pull/109) - Fix OIDC publish
 
