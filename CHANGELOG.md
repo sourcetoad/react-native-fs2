@@ -1,4 +1,9 @@
 # Changelog
+
+# v3.4.1 (March 9, 2025)
+ * [#109](https://github.com/sourcetoad/react-native-fs2/pull/109) - Fix OIDC publish
+
+# v3.4.0 (March 9, 2025)
  * [#82](https://github.com/sourcetoad/react-native-fs2/pull/92) - Upgrade to RN82.
  * [#103](https://github.com/sourcetoad/react-native-fs2/pull/103) - Adds Trusted Publishing
  * [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs
