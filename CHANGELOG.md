@@ -1,4 +1,7 @@
 # Changelog
+ * [#82](https://github.com/sourcetoad/react-native-fs2/pull/92) - Upgrade to RN82.
+ * [#103](https://github.com/sourcetoad/react-native-fs2/pull/103) - Adds Trusted Publishing
+ * [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs
 
 # v3.3.4 (June 6, 2025)
  * [#85](https://github.com/sourcetoad/react-native-fs2/pull/85) - Upgrade example app to RN 79.
