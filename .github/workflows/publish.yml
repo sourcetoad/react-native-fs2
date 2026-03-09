@@ -26,4 +26,4 @@ jobs:
         run: npm ci --network-concurrency 1
 
       - name: Publish (NPM)
-        run: npm publish --access public
+        run: npm publish
