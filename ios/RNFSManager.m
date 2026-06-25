@@ -287,8 +287,8 @@ RCT_EXPORT_METHOD(readFile:(NSString *)filepath
 }
 
 RCT_EXPORT_METHOD(read:(NSString *)filepath
-                  length: (NSInteger *)length
-                  position: (NSInteger *)position
+                  length: (NSInteger)length
+                  position: (NSInteger)position
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
@@ -317,11 +317,11 @@ RCT_EXPORT_METHOD(read:(NSString *)filepath
     }
 
     // Seek to the position if there is one.
-    [file seekToFileOffset: (int)position];
+    [file seekToFileOffset: (NSInteger)position];
 
     NSData *content;
-    if ((int)length > 0) {
-        content = [file readDataOfLength: (int)length];
+    if ((NSInteger)length > 0) {
+        content = [file readDataOfLength: (NSInteger)length];
     } else {
         content = [file readDataToEndOfFile];
     }
