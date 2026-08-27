@@ -40,7 +40,8 @@ npm i --save react-native-nitro-modules
 #### Supported React Native Versions
 | react-native-fs2 | react-native |
 |------------------|--------------|
-| 4.x (nitro)      | >=0.80       |
+| 4.x (nitro)      | >=0.82       |
+| 3.4.x            | >=0.82       |
 | 3.0.x            | >=0.69       |
 
 ### Changelog

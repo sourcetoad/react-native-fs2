@@ -48,7 +48,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:sourcetoad/react-native-fs2.git"
+    "url": "git+ssh://git@github.com/sourcetoad/react-native-fs2.git"
   },
   "keywords": [
     "react-native",
@@ -116,6 +116,9 @@
       "<rootDir>/example/node_modules",
       "<rootDir>/lib/"
     ]
+  },
+  "engines": {
+    "node": ">=20"
   },
   "commitlint": {
     "extends": [

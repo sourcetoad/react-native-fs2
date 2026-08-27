@@ -1,5 +1,16 @@
 # Changelog
 
+# v3.4.2 (March 9, 2025)
+ * [#111](https://github.com/sourcetoad/react-native-fs2/pull/111) - Move CI to Node 24
+
+# v3.4.1 (March 9, 2025)
+ * [#109](https://github.com/sourcetoad/react-native-fs2/pull/109) - Fix OIDC publish
+
+# v3.4.0 (March 9, 2025)
+ * [#82](https://github.com/sourcetoad/react-native-fs2/pull/92) - Upgrade to RN82.
+ * [#103](https://github.com/sourcetoad/react-native-fs2/pull/103) - Adds Trusted Publishing
+ * [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs
+
 # v3.3.4 (June 6, 2025)
  * [#85](https://github.com/sourcetoad/react-native-fs2/pull/85) - Upgrade example app to RN 79.
  * [#84](https://github.com/sourcetoad/react-native-fs2/pull/84) - MediaStore improvements with IS_PENDING flag for Android 29+.

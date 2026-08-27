@@ -169,7 +169,6 @@ const Example = () => {
       const mediaStat = await RNFS.stat(contentURI);
 
       runStatus = `${runStatus}\n- "Media File" stat: ${JSON.stringify(mediaStat)}`;
-      setResult(runStatus);
 
       await MediaStore.updateMediaFile(
         contentURI,
@@ -180,6 +179,23 @@ const Example = () => {
         },
         MediaStore.MEDIA_IMAGE
       );
+
+      // content uri to content uri actions
+      runStatus = `${runStatus}\n- Copying content URI to content URI`;
+      const contentURI2 = await copyImageToMediaStore(
+        contentURI,
+        'copiedImage.png',
+        'RNFSExample3Folder',
+        'prefix',
+        true
+      );
+      runStatus = `${runStatus}\n- Copied content URI to content URI: ${contentURI2}`;
+
+      runStatus = `${runStatus}\n- Stat of copied content URI:`;
+      const contentURI2Stat = await RNFS.stat(contentURI2);
+      runStatus = `${runStatus}\n- ${JSON.stringify(contentURI2Stat, null, 2)}`;
+
+      setResult(runStatus);
     } catch (err) {
       setResult(`${runStatus}\n- Error Running Example`);
       console.error(err);

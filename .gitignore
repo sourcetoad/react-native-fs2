@@ -29,6 +29,19 @@ DerivedData
 *.xcuserstate
 project.xcworkspace
 **/.xcode.env.local
+.idea/
+# Pods - for those of you who use CocoaPods
+Pods
+update-test.sh
+.vscode/
+android/.gradle/*
+android/gradle/*
+android/*.iml
+android/local.properties
+android/.settings
+android/.project
+.kotlin/
+Session.vim
 
 # Android/IJ
 #
