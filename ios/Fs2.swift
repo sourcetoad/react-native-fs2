@@ -43,8 +43,8 @@ class Fs2: HybridFs2Spec {
     self.downloader.delegate = self
   }
   
-  func readFile(filepath: String) -> Promise<ArrayBufferHolder> {
-    return Promise<ArrayBufferHolder>.async {
+  func readFile(filepath: String) -> Promise<ArrayBuffer> {
+    return Promise<ArrayBuffer>.async {
       let fileManager = FileManager.default
       var isDir: ObjCBool = false
       
@@ -60,7 +60,7 @@ class Fs2: HybridFs2Spec {
       
       do {
         let fileData = try Data(contentsOf: URL(fileURLWithPath: filepath))
-        let arrayBufferHolder = try ArrayBufferHolder.copy(data: fileData)
+        let arrayBufferHolder = try ArrayBuffer.copy(data: fileData)
         return arrayBufferHolder
       } catch {
         // Catch other potential errors during file reading (e.g., permissions)
@@ -69,10 +69,10 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func writeFile(filepath: String, data: ArrayBufferHolder) -> Promise<Void> {
-    let copiedBuffer: ArrayBufferHolder
+  func writeFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
+    let copiedBuffer: ArrayBuffer
     do {
-      copiedBuffer = try ArrayBufferHolder.copy(of: data)
+      copiedBuffer = try ArrayBuffer.copy(of: data)
     } catch {
       return Promise<Void>.rejected(withError: error)
     }
@@ -98,7 +98,7 @@ class Fs2: HybridFs2Spec {
       }
       
       do {
-        let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBufferHolder to Data
+        let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBuffer to Data
         try fileData.write(to: URL(fileURLWithPath: filepath))
         return // Return Void on success
       } catch {
@@ -432,10 +432,10 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func appendFile(filepath: String, data: ArrayBufferHolder) -> Promise<Void> {
-    let copiedBuffer: ArrayBufferHolder
+  func appendFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
+    let copiedBuffer: ArrayBuffer
     do {
-      copiedBuffer = try ArrayBufferHolder.copy(of: data)
+      copiedBuffer = try ArrayBuffer.copy(of: data)
     } catch {
       return Promise<Void>.rejected(withError: error)
     }
@@ -509,8 +509,8 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func read(filepath: String, length: Double, position: Double) -> Promise<ArrayBufferHolder> {
-    return Promise<ArrayBufferHolder>.async {
+  func read(filepath: String, length: Double, position: Double) -> Promise<ArrayBuffer> {
+    return Promise<ArrayBuffer>.async {
       let normalizedPath = Self.normalizePath(filepath)
       let fileManager = FileManager.default
       
@@ -539,8 +539,8 @@ class Fs2: HybridFs2Spec {
           // Read the specified number of bytes
           let data = try fileHandle.read(upToCount: Int(length)) ?? Data()
           
-          // Convert to ArrayBufferHolder and return
-          let arrayBufferHolder = try ArrayBufferHolder.copy(data: data)
+          // Convert to ArrayBuffer and return
+          let arrayBufferHolder = try ArrayBuffer.copy(data: data)
           return arrayBufferHolder
         } catch {
           throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EREAD: Failed to read file at path \(normalizedPath): \(error.localizedDescription)"])
@@ -551,7 +551,7 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func write(filepath: String, data: ArrayBufferHolder, position: Double?) -> Promise<Void> {
+  func write(filepath: String, data: ArrayBuffer, position: Double?) -> Promise<Void> {
     return Promise<Void>.async {
       let normalizedPath = Self.normalizePath(filepath)
       let fileManager = FileManager.default
@@ -769,7 +769,7 @@ class Fs2: HybridFs2Spec {
 extension Fs2: DownloaderDelegate {
   func downloadDidBegin(jobId: Int, contentLength: Int64, headers: [AnyHashable: Any]?) {
     let headersDict = headers ?? [:]
-    let tempHeaderMap = AnyMapHolder()
+    let tempHeaderMap = AnyMap()
 
     for (key, value) in headersDict {
       if let keyStr = key as? String, let valueStr = value as? String {

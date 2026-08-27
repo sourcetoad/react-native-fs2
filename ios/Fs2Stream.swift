@@ -233,7 +233,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             }
 
             let data = buffer.prefix(bytesRead)
-            let arrayBuffer = try ArrayBufferHolder.copy(data: data)
+            let arrayBuffer = try ArrayBuffer.copy(data: data)
 
             self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(
               streamId: streamId,
@@ -358,10 +358,10 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - Write Stream Control
 
-  func writeToStream(streamId: String, data: NitroModules.ArrayBufferHolder) throws -> NitroModules.Promise<Void> {
-    let copiedBuffer: ArrayBufferHolder
+  func writeToStream(streamId: String, data: NitroModules.ArrayBuffer) throws -> NitroModules.Promise<Void> {
+    let copiedBuffer: ArrayBuffer
     do {
-      copiedBuffer = try ArrayBufferHolder.copy(of: data)
+      copiedBuffer = try ArrayBuffer.copy(of: data)
     } catch {
       return Promise<Void>.rejected(withError: error)
     }
