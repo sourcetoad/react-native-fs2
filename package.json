@@ -96,19 +96,19 @@
     "eslint-plugin-react-hooks": "^7.0.0",
     "eslint-plugin-react-native": "^5.0.0",
     "jest": "^29.7.0",
-    "nitrogen": "^0.29.7",
+    "nitrogen": "^0.37.0",
     "prettier": "^3.6.2",
     "react": "19.1.0",
     "react-native": "0.81.4",
     "react-native-builder-bob": "^0.40.13",
-    "react-native-nitro-modules": "^0.29.7",
+    "react-native-nitro-modules": "^0.37.0",
     "turbo": "^2.5.6",
     "typescript": "^5.2.2"
   },
   "peerDependencies": {
     "react": "*",
     "react-native": "*",
-    "react-native-nitro-modules": "^0.29.7"
+    "react-native-nitro-modules": "^0.37.0"
   },
   "jest": {
     "preset": "react-native",
