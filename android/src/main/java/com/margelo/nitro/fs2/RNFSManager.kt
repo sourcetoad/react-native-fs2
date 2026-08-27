@@ -4,7 +4,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
+import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -284,7 +286,56 @@ class RNFSManager(private val context: ReactApplicationContext) {
             ?: emptyList()
     }
 
+    private fun statContentUri(uri: Uri, filepath: String): NativeStatResult {
+        val resolver = context.contentResolver
+        var size = -1L
+        var lastModified: Long? = null
+
+        // Query without a projection — providers expose different column sets,
+        // and asking for a column a provider lacks throws.
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIdx != -1) size = cursor.getLong(sizeIdx)
+
+                val lmIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                if (lmIdx != -1) lastModified = cursor.getLong(lmIdx)
+            }
+        }
+
+        // Fall back to the file descriptor when the provider reports no size.
+        if (size < 0) {
+            resolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                if (afd.length >= 0) size = afd.length
+            }
+        }
+
+        // Existence check.
+        try {
+            resolver.openInputStream(uri)?.close()
+                ?: throw IORejectionException("ENOENT", "File does not exist: $filepath")
+        } catch (e: FileNotFoundException) {
+            throw IORejectionException("ENOENT", "File does not exist: $filepath")
+        }
+
+        val mtimeSec = lastModified?.let { it / 1000 } ?: 0L
+
+        return NativeStatResult(
+            ctime = mtimeSec.toDouble(),
+            mtime = mtimeSec.toDouble(),
+            size = if (size >= 0) size.toDouble() else 0.0,
+            type = StatResultType.FILE, // content URIs are files, never directories
+            originalFilepath = filepath,
+            mode = null,
+        )
+    }
+
     fun stat(filepath: String): NativeStatResult {
+        val uri = Uri.parse(filepath)
+        if ("content" == uri.scheme) {
+            return statContentUri(uri, filepath)
+        }
+
         val originalPath = getOriginalFilepath(filepath, true)
         val file = File(originalPath)
 
