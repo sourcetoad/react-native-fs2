@@ -1,9 +1,9 @@
-import type { HybridObject } from 'react-native-nitro-modules';
+import type { HybridObject, Int64 } from 'react-native-nitro-modules';
 
 export interface ReadStreamOptions {
   bufferSize?: number;
-  start?: bigint;
-  end?: bigint;
+  start?: Int64;
+  end?: Int64;
 }
 
 export interface WriteStreamOptions {
@@ -24,20 +24,20 @@ export interface WriteStreamHandle {
 export interface ReadStreamDataEvent {
   streamId: string;
   data: ArrayBuffer;
-  chunk: bigint;
-  position: bigint;
+  chunk: Int64;
+  position: Int64;
 }
 
 export interface ReadStreamProgressEvent {
   streamId: string;
-  bytesRead: bigint;
-  totalBytes: bigint;
+  bytesRead: Int64;
+  totalBytes: Int64;
   progress: number;
 }
 
 export interface ReadStreamEndEvent {
   streamId: string;
-  bytesRead: bigint;
+  bytesRead: Int64;
   success: boolean;
 }
 
@@ -49,13 +49,13 @@ export interface ReadStreamErrorEvent {
 
 export interface WriteStreamProgressEvent {
   streamId: string;
-  bytesWritten: bigint;
-  lastChunkSize: bigint;
+  bytesWritten: Int64;
+  lastChunkSize: Int64;
 }
 
 export interface WriteStreamFinishEvent {
   streamId: string;
-  bytesWritten: bigint;
+  bytesWritten: Int64;
   success: boolean;
 }
 
@@ -89,7 +89,7 @@ export interface Fs2Stream
   flushWriteStream(streamId: string): Promise<void>;
   closeWriteStream(streamId: string): Promise<void>;
   isWriteStreamActive(streamId: string): Promise<boolean>;
-  getWriteStreamPosition(streamId: string): Promise<bigint>;
+  getWriteStreamPosition(streamId: string): Promise<Int64>;
   endWriteStream(streamId: string): Promise<void>;
 
   // Stream Event Listeners

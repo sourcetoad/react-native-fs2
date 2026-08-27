@@ -1,4 +1,4 @@
-import type { HybridObject } from 'react-native-nitro-modules';
+import type { HybridObject, Int64 } from 'react-native-nitro-modules';
 
 export type MediaCollectionType = 'Audio' | 'Video' | 'Image' | 'Download';
 
@@ -13,8 +13,8 @@ export interface MediaStoreFile {
   name: string; // Display name
   mimeType: string; // e.g., "image/jpeg"
   size: number; // Size in bytes
-  dateAdded?: bigint; // Timestamp (ms since epoch)
-  dateModified?: bigint; // Timestamp (ms since epoch)
+  dateAdded?: Int64; // Timestamp (ms since epoch)
+  dateModified?: Int64; // Timestamp (ms since epoch)
   relativePath?: string; // Relative path within its collection, e.g., "Pictures/MyAlbum/"
 }
 
