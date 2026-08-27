@@ -12,10 +12,9 @@ import android.os.FileUtils
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.net.toUri
-import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 
 import com.margelo.nitro.NitroModules
@@ -114,29 +113,37 @@ class RNFSMediaStoreManager {
         }
     }
 
+    private fun getSourceUri(path: String): Uri {
+        val uri = path.toUri()
+        return if (uri.scheme == null) "file://$path".toUri() else uri
+    }
+
+    private fun getSourceInputStream(path: String): InputStream =
+        context.contentResolver.openInputStream(getSourceUri(path))
+            ?: throw IOException("Could not open input stream for: $path")
+
     fun writeToMediaFile(fileUri: Uri, filePath: String, transformFile: Boolean = false): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
             throw UnsupportedOperationException("Android version not supported")
         val resolver = context.contentResolver
         try {
-            val src = File(filePath)
-            if (!src.exists()) throw IOException("No such file ('$filePath')")
-            val descr =
-                resolver.openFileDescriptor(fileUri, "w")
+            getSourceInputStream(filePath).use { source ->
+                val descr = resolver.openFileDescriptor(fileUri, "w")
                     ?: throw IOException("Failed to open file descriptor")
-
-            FileInputStream(src).use { fin ->
-                FileOutputStream(descr.fileDescriptor).use { out ->
-                    if (transformFile) {
-                        val bytes = fin.readBytes()
-                        // Implement transformation logic if needed
-                        out.write(bytes) // No transformation in this version
-                    } else {
-                        FileUtils.copy(fin, out)
+                descr.use {
+                    FileOutputStream(it.fileDescriptor).use { out ->
+                        if (transformFile) {
+                            val transformer = RNFSFileTransformer.sharedFileTransformer
+                                ?: throw IllegalStateException(
+                                    "Write to media file with transform was specified but the shared file transformer is not set"
+                                )
+                            out.write(transformer.onWriteFile(source.readBytes()))
+                        } else {
+                            FileUtils.copy(source, out)
+                        }
                     }
                 }
             }
-            
             return true
         } catch (e: Exception) {
             throw IOException("Failed to write file: ${e.message}", e)
@@ -147,15 +154,17 @@ class RNFSMediaStoreManager {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
             throw UnsupportedOperationException("Android version not supported")
         val resolver = context.contentResolver
-        val srcFile = File(path)
-        if (!srcFile.exists()) throw IOException("No such file ('$path')")
+        try {
+            getSourceInputStream(path).close()
+        } catch (e: IOException) {
+            throw IORejectionException("ENOENT", "Source not accessible: $path")
+        }
         val fileUri = createMediaFile(file, mediaType)
         try {
             val pendingValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 1) }
             if (resolver.update(fileUri, pendingValues, null, null) == 0) {
-                cleanupMediaStoreEntry(fileUri, resolver)
                 throw IOException(
-                    "Failed to mark media file as pending (0 rows updated). Original entry cleaned up."
+                    "Failed to mark media file as pending (0 rows updated)."
                 )
             }
             val writeSuccessful = writeToMediaFile(fileUri, path, false)
@@ -165,13 +174,11 @@ class RNFSMediaStoreManager {
                 if (resolver.update(fileUri, commitValues, null, null) > 0) {
                     return fileUri
                 } else {
-                    cleanupMediaStoreEntry(fileUri, resolver)
                     throw IOException(
-                        "Failed to commit media file (unmark as pending - 0 rows updated). Entry with data cleaned up."
+                        "Failed to commit media file (unmark as pending - 0 rows updated)."
                     )
                 }
             } else {
-                cleanupMediaStoreEntry(fileUri, resolver)
                 throw IOException("Failed to write file to MediaStore.")
             }
         } catch (e: Exception) {
