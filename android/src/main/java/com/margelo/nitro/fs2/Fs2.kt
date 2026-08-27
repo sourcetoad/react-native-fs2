@@ -503,7 +503,7 @@ class Fs2() : HybridFs2Spec() {
             throw Error("${ex.code}: ${ex.message}")
         }
 
-        throw Error(ex.message)
+        throw Error("EUNSPECIFIED: ${ex.message ?: ex.toString()}")
     }
 
     // Convert Map<String, String> to ReadableMap for React Native bridge
