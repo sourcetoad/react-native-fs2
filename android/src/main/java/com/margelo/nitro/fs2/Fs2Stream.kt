@@ -6,6 +6,7 @@ import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.fs2.utils.Fs2Util
 import com.margelo.nitro.fs2.utils.BufferPool
 import com.margelo.nitro.fs2.utils.StreamError
+import com.margelo.nitro.fs2.utils.FsError
 
 import java.io.File
 import java.io.IOException
@@ -70,7 +71,8 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     )
 
     // Add reference to RNFSManager and context
-    private val reactContext = NitroModules.applicationContext!!
+    private val reactContext = NitroModules.applicationContext
+        ?: throw Error("No Context available!")
 
     // Add buffer pool instance
     private val bufferPool = BufferPool()
@@ -350,7 +352,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun pauseReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val state =
-                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+                readStreams[streamId] ?: throw FsError("ENOENT: No such read stream: $streamId")
             if (!state.isActive) return@async
 
             // Use tryLock to avoid deadlock - locks mutex to pause stream
@@ -362,7 +364,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun resumeReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val state =
-                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+                readStreams[streamId] ?: throw FsError("ENOENT: No such read stream: $streamId")
             if (state.isActive) return@async
 
             // Safely unlock mutex to resume stream - check if locked first
@@ -380,7 +382,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun closeReadStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val state = readStreams.remove(streamId)
-                ?: throw Exception("ENOENT: No such read stream: $streamId")
+                ?: throw FsError("ENOENT: No such read stream: $streamId")
             state.job?.cancel()
             readStreamDataListeners.remove(streamId)
             readStreamProgressListeners.remove(streamId)
@@ -392,7 +394,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun isReadStreamActive(streamId: String): Promise<Boolean> {
         return Promise.async {
             val state =
-                readStreams[streamId] ?: throw Exception("ENOENT: No such read stream: $streamId")
+                readStreams[streamId] ?: throw FsError("ENOENT: No such read stream: $streamId")
             return@async state.isActive
         }
     }
@@ -401,7 +403,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun writeToStream(streamId: String, data: ArrayBuffer): Promise<Unit> {
         val copiedBuffer: ArrayBuffer
         try {
-            copiedBuffer = ArrayBuffer.copy(data)
+            copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             return Promise.rejected(StreamError.BufferError("Failed to copy ArrayBuffer: ${e.message}"))
         }
@@ -427,7 +429,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun flushWriteStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val impl =
-                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+                writeStreams[streamId] ?: throw FsError("ENOENT: No such write stream: $streamId")
             impl.outputStream.flush()
         }
     }
@@ -465,7 +467,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun isWriteStreamActive(streamId: String): Promise<Boolean> {
         return Promise.async {
             val impl =
-                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+                writeStreams[streamId] ?: throw FsError("ENOENT: No such write stream: $streamId")
             return@async impl.state.isActive
         }
     }
@@ -473,7 +475,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun getWriteStreamPosition(streamId: String): Promise<Long> {
         return Promise.async {
             val impl =
-                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+                writeStreams[streamId] ?: throw FsError("ENOENT: No such write stream: $streamId")
             return@async impl.state.position
         }
     }
@@ -481,7 +483,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     override fun endWriteStream(streamId: String): Promise<Unit> {
         return Promise.async {
             val impl =
-                writeStreams[streamId] ?: throw Exception("ENOENT: No such write stream: $streamId")
+                writeStreams[streamId] ?: throw FsError("ENOENT: No such write stream: $streamId")
 
             // Mark the stream as finished (no more writes)
             impl.state.isActive = false

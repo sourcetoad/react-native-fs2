@@ -5,6 +5,8 @@ import com.facebook.react.bridge.ReadableMap
 import com.margelo.nitro.NitroModules
 import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.core.Promise
+import com.margelo.nitro.fs2.utils.FsError
+import com.margelo.nitro.fs2.utils.JsVisibleError
 import java.io.File
 import java.io.FileNotFoundException
 import java.net.URL
@@ -12,7 +14,8 @@ import java.nio.ByteBuffer
 
 @DoNotStrip
 class Fs2() : HybridFs2Spec() {
-    private val reactContext = NitroModules.applicationContext!!
+    private val reactContext = NitroModules.applicationContext
+        ?: throw Error("No Context available!")
     private val rnfsManager = RNFSManager(reactContext)
     private val listeners = DownloadListeners()
 
@@ -177,7 +180,7 @@ class Fs2() : HybridFs2Spec() {
         val copiedBuffer: ArrayBuffer
         try {
             // Create a copy of the ArrayBuffer to ensure we have ownership
-            copiedBuffer = ArrayBuffer.copy(data)
+            copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
             return Promise.rejected(reject(path, e))
@@ -212,7 +215,7 @@ class Fs2() : HybridFs2Spec() {
         val copiedBuffer: ArrayBuffer
         try {
             // Create a copy of the ArrayBuffer to ensure we have ownership
-            copiedBuffer = ArrayBuffer.copy(data)
+            copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
             return Promise.rejected(reject(filepath, e))
@@ -247,7 +250,7 @@ class Fs2() : HybridFs2Spec() {
         val copiedBuffer: ArrayBuffer
         try {
             // Create a copy of the ArrayBuffer to ensure we have ownership
-            copiedBuffer = ArrayBuffer.copy(data)
+            copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
             return Promise.rejected(reject(filepath, e))
@@ -311,7 +314,7 @@ class Fs2() : HybridFs2Spec() {
                     val result = rnfsManager.touch(filepath, mtime.toLong(), null)
                     if (!result) {
                         // If the operation failed, throw an appropriate error
-                        throw Error(
+                        throw FsError(
                             "ETOUCH: Failed to set modification time for file at path: $filepath"
                         )
                     }
@@ -338,7 +341,7 @@ class Fs2() : HybridFs2Spec() {
             } catch (e: Exception) {
                 // Although rnfsManager.getFSInfo() doesn't declare throwing specific exceptions,
                 // we catch broadly here just in case of unexpected runtime issues.
-                throw Error("EFSINFO: Failed to get file system info: ${e.message}")
+                throw FsError("EFSINFO: Failed to get file system info: ${e.message}")
             }
         }
     }
@@ -486,24 +489,28 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun getAllExternalFilesDirs(): Promise<Array<String>> {
-        return Promise.async { throw Error("getAllExternalFilesDirs is not supported") }
+        return Promise.async { throw FsError("getAllExternalFilesDirs is not supported") }
     }
 
     override fun scanFile(path: String): Promise<Array<String>> {
-        return Promise.async { throw Error("scanFile is not supported") }
+        return Promise.async { throw FsError("scanFile is not supported") }
     }
 
     // Private methods
     private fun reject(filepath: String, ex: Exception): Throwable {
+        // Already a JS-facing error carrying a formatted "CODE: message" - propagate it
+        // unchanged. Without this it would be re-wrapped as "EUNSPECIFIED: CODE: message".
+        if (ex is JsVisibleError) throw ex
+
         if (ex is FileNotFoundException) {
-            throw Error("ENOENT: no such file or directory, open '$filepath'")
+            throw FsError("ENOENT: no such file or directory, open '$filepath'")
         }
 
         if (ex is IORejectionException) {
-            throw Error("${ex.code}: ${ex.message}")
+            throw FsError("${ex.code}: ${ex.message}")
         }
 
-        throw Error("EUNSPECIFIED: ${ex.message ?: ex.toString()}")
+        throw FsError("EUNSPECIFIED: ${ex.message ?: ex.toString()}")
     }
 
     // Convert Map<String, String> to ReadableMap for React Native bridge

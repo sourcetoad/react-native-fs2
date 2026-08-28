@@ -359,23 +359,20 @@ class Fs2Stream: HybridFs2StreamSpec {
   // MARK: - Write Stream Control
 
   func writeToStream(streamId: String, data: NitroModules.ArrayBuffer) throws -> NitroModules.Promise<Void> {
-    let copiedBuffer: ArrayBuffer
-    do {
-      copiedBuffer = try ArrayBuffer.copy(of: data)
-    } catch {
-      return Promise<Void>.rejected(withError: error)
-    }
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous
+    // call; ones that already own their memory need no copy at all.
+    let copiedBuffer = data.asOwning()
 
     return Promise.async {
       guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
-      if !state.isActive { throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write stream is not active: \(streamId)"]) }
+      if !state.isActive { throw RuntimeError.error(withMessage: "EPIPE: Write stream is not active: \(streamId)") }
 
       // Check if task is cancelled BEFORE yielding data to prevent data loss
       if let task = state.task, task.isCancelled {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPIPE: Write job is not active"])
+        throw RuntimeError.error(withMessage: "EPIPE: Write job is not active")
       }
 
       let data = copiedBuffer.toData(copyIfNeeded: true)
@@ -386,7 +383,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func flushWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
       state.shouldFlush = true
@@ -396,7 +393,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func closeWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.writeStreams.removeValue(forKey: streamId) else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
       state.shouldClose = true
@@ -413,7 +410,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func isWriteStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
     return Promise.async {
       guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
       return state.isActive
     }
@@ -422,7 +419,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func getWriteStreamPosition(streamId: String) throws -> NitroModules.Promise<Int64> {
     return Promise.async {
       guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
       return state.position
     }
@@ -431,7 +428,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   func endWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
       guard let state = self.writeStreams[streamId] else {
-        throw NSError(domain: "Fs2Stream", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: No such write stream: \(streamId)"])
+        throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
       // Mark the stream as finished (no more writes)

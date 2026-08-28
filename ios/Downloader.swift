@@ -53,7 +53,7 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
     var config: URLSessionConfiguration
     var isBackground = false
     if let options = options {
-      jobId = Int(options.jobId ?? 1)
+      jobId = Int(options.jobId)
       isBackground = options.background ?? false
     }
 

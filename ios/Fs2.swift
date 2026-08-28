@@ -50,12 +50,12 @@ class Fs2: HybridFs2Spec {
       
       guard fileManager.fileExists(atPath: filepath, isDirectory: &isDir) else {
         // Match original library's ENOENT error for file not found
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: no such file or directory, open '\(filepath)'"])
+        throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(filepath)'")
       }
       
       guard !isDir.boolValue else {
         // Match original library's EISDIR error for path is a directory
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: path is a directory, not a file: \(filepath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: path is a directory, not a file: \(filepath)")
       }
       
       do {
@@ -64,18 +64,15 @@ class Fs2: HybridFs2Spec {
         return arrayBufferHolder
       } catch {
         // Catch other potential errors during file reading (e.g., permissions)
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EREAD: Failed to read file at path \(filepath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "EREAD: Failed to read file at path \(filepath): \(error.localizedDescription)")
       }
     }
   }
   
   func writeFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
-    let copiedBuffer: ArrayBuffer
-    do {
-      copiedBuffer = try ArrayBuffer.copy(of: data)
-    } catch {
-      return Promise<Void>.rejected(withError: error)
-    }
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous
+    // call; ones that already own their memory need no copy at all.
+    let copiedBuffer = data.asOwning()
 
     return Promise<Void>.async {
       let fileManager = FileManager.default
@@ -83,7 +80,7 @@ class Fs2: HybridFs2Spec {
       
       // Check if path is a directory
       if fileManager.fileExists(atPath: filepath, isDirectory: &isDir) && isDir.boolValue {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: path is a directory, cannot write file: \(filepath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: path is a directory, cannot write file: \(filepath)")
       }
       
       // Check if parent directory exists, create if not.
@@ -93,7 +90,7 @@ class Fs2: HybridFs2Spec {
         do {
           try fileManager.createDirectory(at: parentDirectoryURL, withIntermediateDirectories: true, attributes: nil)
         } catch {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EMKDIRP: Failed to create parent directories for path \(filepath): \(error.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EMKDIRP: Failed to create parent directories for path \(filepath): \(error.localizedDescription)")
         }
       }
       
@@ -102,7 +99,7 @@ class Fs2: HybridFs2Spec {
         try fileData.write(to: URL(fileURLWithPath: filepath))
         return // Return Void on success
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EWRITE: Failed to write file to path \(filepath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath): \(error.localizedDescription)")
       }
     }
   }
@@ -161,7 +158,7 @@ class Fs2: HybridFs2Spec {
           // So, we might not need this specific check unless we want to differentiate "created now" vs "already existed".
           // For now, let\'s assume standard createDirectory behavior is fine.
         }
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EMKDIR: Failed to create directory at path \(filepath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "EMKDIR: Failed to create directory at path \(filepath): \(error.localizedDescription)")
       }
     }
   }
@@ -213,10 +210,10 @@ class Fs2: HybridFs2Spec {
       var isDirObj: ObjCBool = false
       
       guard fileManager.fileExists(atPath: normalizedDirPath, isDirectory: &isDirObj) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: Directory not found at path: \(normalizedDirPath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: Directory not found at path: \(normalizedDirPath)")
       }
       guard isDirObj.boolValue else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOTDIR: Path is not a directory: \(normalizedDirPath)"])
+        throw RuntimeError.error(withMessage: "ENOTDIR: Path is not a directory: \(normalizedDirPath)")
       }
       
       do {
@@ -249,7 +246,7 @@ class Fs2: HybridFs2Spec {
         }
         return dirItems
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EREADDIR: Failed to read directory at path \(normalizedDirPath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "EREADDIR: Failed to read directory at path \(normalizedDirPath): \(error.localizedDescription)")
       }
     }
   }
@@ -261,7 +258,7 @@ class Fs2: HybridFs2Spec {
       var isDirObj: ObjCBool = false
       
       guard fileManager.fileExists(atPath: normalizedFilepath, isDirectory: &isDirObj) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: File or directory not found at path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: File or directory not found at path: \(normalizedFilepath)")
       }
       
       do {
@@ -287,7 +284,7 @@ class Fs2: HybridFs2Spec {
           originalFilepath: normalizedFilepath
         )
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ESTAT: Failed to get stat for path \(normalizedFilepath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "ESTAT: Failed to get stat for path \(normalizedFilepath): \(error.localizedDescription)")
       }
     }
   }
@@ -299,19 +296,19 @@ class Fs2: HybridFs2Spec {
       var isDirObj: ObjCBool = false
       
       guard fileManager.fileExists(atPath: normalizedFilepath, isDirectory: &isDirObj) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: File not found at path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: File not found at path: \(normalizedFilepath)")
       }
       
       guard !isDirObj.boolValue else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: Path is a directory, cannot hash: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot hash: \(normalizedFilepath)")
       }
       
       guard let fileURL = URL(string: "file://\(normalizedFilepath)") else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EURL: Could not create URL for path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "EURL: Could not create URL for path: \(normalizedFilepath)")
       }
       
       guard let fileData = try? Data(contentsOf: fileURL) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EREAD: Could not read file data from path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "EREAD: Could not read file data from path: \(normalizedFilepath)")
       }
       
       var digest = [UInt8]()
@@ -348,7 +345,7 @@ class Fs2: HybridFs2Spec {
       
       // Check if source exists
       guard fileManager.fileExists(atPath: normalizedFilepath) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: Source file not found at path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: Source file not found at path: \(normalizedFilepath)")
       }
       
       // If destination is a directory, append the source filename to the destination path
@@ -386,7 +383,7 @@ class Fs2: HybridFs2Spec {
           return // Return Void on success
         } catch let fallbackError {
           // If both move and copy-delete fail, throw an error reflecting the move operation
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EMOVE: Failed to move file from \(normalizedFilepath) to \(finalDestPath). Move error: \(error.localizedDescription). Fallback copy error: \(fallbackError.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EMOVE: Failed to move file from \(normalizedFilepath) to \(finalDestPath). Move error: \(error.localizedDescription). Fallback copy error: \(fallbackError.localizedDescription)")
         }
       }
     }
@@ -400,7 +397,7 @@ class Fs2: HybridFs2Spec {
       
       // Check if source exists
       guard fileManager.fileExists(atPath: normalizedFilepath) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: Source file not found at path: \(normalizedFilepath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: Source file not found at path: \(normalizedFilepath)")
       }
       
       // If destination is a directory, append the source filename to the destination path
@@ -427,18 +424,15 @@ class Fs2: HybridFs2Spec {
         try fileManager.copyItem(atPath: normalizedFilepath, toPath: finalDestPath)
         return // Return Void on success
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ECOPY: Failed to copy file from \(normalizedFilepath) to \(finalDestPath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "ECOPY: Failed to copy file from \(normalizedFilepath) to \(finalDestPath): \(error.localizedDescription)")
       }
     }
   }
   
   func appendFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
-    let copiedBuffer: ArrayBuffer
-    do {
-      copiedBuffer = try ArrayBuffer.copy(of: data)
-    } catch {
-      return Promise<Void>.rejected(withError: error)
-    }
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous
+    // call; ones that already own their memory need no copy at all.
+    let copiedBuffer = data.asOwning()
     
     return Promise<Void>.async {
       let normalizedPath = Self.normalizePath(filepath)
@@ -446,7 +440,7 @@ class Fs2: HybridFs2Spec {
       
       var isDir: ObjCBool = false
       if fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) && isDir.boolValue {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: Path is a directory, cannot append: \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot append: \(normalizedPath)")
       }
       
       let fileData = copiedBuffer.toData(copyIfNeeded: true)
@@ -465,7 +459,7 @@ class Fs2: HybridFs2Spec {
           try fileHandle.write(contentsOf: fileData)
           return
         } catch {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EAPPEND: Failed to append data to file \(normalizedPath): \(error.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EAPPEND: Failed to append data to file \(normalizedPath): \(error.localizedDescription)")
         }
       } else {
         // File does not exist, create it and write data (same as writeFile essentially)
@@ -478,7 +472,7 @@ class Fs2: HybridFs2Spec {
           try fileData.write(to: URL(fileURLWithPath: normalizedPath))
           return
         } catch {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EWRITE: Failed to create and write file at path \(normalizedPath) during append operation: \(error.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to create and write file at path \(normalizedPath) during append operation: \(error.localizedDescription)")
         }
       }
     }
@@ -490,7 +484,7 @@ class Fs2: HybridFs2Spec {
       // Get the path to the app's documents directory, which is part of the sandbox.
       // File system attributes are typically queried against a path within the target file system.
       guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EPATH: Could not determine documents directory path."])
+        throw RuntimeError.error(withMessage: "EPATH: Could not determine documents directory path.")
       }
       
       do {
@@ -499,12 +493,12 @@ class Fs2: HybridFs2Spec {
         let freeSpace = attributes[.systemFreeSize] as? NSNumber
         
         guard let total = totalSpace, let free = freeSpace else {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EATTR: Could not retrieve file system size attributes."])
+          throw RuntimeError.error(withMessage: "EATTR: Could not retrieve file system size attributes.")
         }
         
         return FSInfoResult(totalSpace: total.doubleValue, freeSpace: free.doubleValue)
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EFSINFO: Failed to get file system info: \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "EFSINFO: Failed to get file system info: \(error.localizedDescription)")
       }
     }
   }
@@ -516,11 +510,11 @@ class Fs2: HybridFs2Spec {
       
       var isDir: ObjCBool = false
       guard fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: File not found at path: \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "ENOENT: File not found at path: \(normalizedPath)")
       }
       
       guard !isDir.boolValue else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: Path is a directory, cannot read: \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot read: \(normalizedPath)")
       }
       
       if let fileHandle = FileHandle(forReadingAtPath: normalizedPath) {
@@ -543,10 +537,10 @@ class Fs2: HybridFs2Spec {
           let arrayBufferHolder = try ArrayBuffer.copy(data: data)
           return arrayBufferHolder
         } catch {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EREAD: Failed to read file at path \(normalizedPath): \(error.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EREAD: Failed to read file at path \(normalizedPath): \(error.localizedDescription)")
         }
       } else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EOPEN: Failed to open file at path \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "EOPEN: Failed to open file at path \(normalizedPath)")
       }
     }
   }
@@ -558,7 +552,7 @@ class Fs2: HybridFs2Spec {
       
       var isDir: ObjCBool = false
       if fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) && isDir.boolValue {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EISDIR: Path is a directory, cannot write: \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot write: \(normalizedPath)")
       }
       
       let fileData = data.toData(copyIfNeeded: true)
@@ -570,12 +564,12 @@ class Fs2: HybridFs2Spec {
           do {
             try fileManager.createDirectory(at: parentDirectoryURL, withIntermediateDirectories: true, attributes: nil)
           } catch {
-            throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EMKDIRP: Failed to create parent directories for path \(normalizedPath): \(error.localizedDescription)"])
+            throw RuntimeError.error(withMessage: "EMKDIRP: Failed to create parent directories for path \(normalizedPath): \(error.localizedDescription)")
           }
         }
         let success = fileManager.createFile(atPath: normalizedPath, contents: fileData, attributes: nil)
         if !success {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: no such file or directory, open '\(normalizedPath)'"])
+          throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(normalizedPath)'")
         }
         return
       }
@@ -599,10 +593,10 @@ class Fs2: HybridFs2Spec {
           try fileHandle.write(contentsOf: fileData)
           return
         } catch {
-          throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EWRITE: Failed to write data to file \(normalizedPath): \(error.localizedDescription)"])
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to write data to file \(normalizedPath): \(error.localizedDescription)")
         }
       } else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "EOPEN: Failed to open file at path \(normalizedPath)"])
+        throw RuntimeError.error(withMessage: "EOPEN: Failed to open file at path \(normalizedPath)")
       }
     }
   }
@@ -614,7 +608,7 @@ class Fs2: HybridFs2Spec {
       var isDir: ObjCBool = false
       
       guard fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) else {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ENOENT: no such file, open '\(normalizedPath)'"])
+        throw RuntimeError.error(withMessage: "ENOENT: no such file, open '\(normalizedPath)'")
       }
       
       var attributes = [FileAttributeKey: Any]()
@@ -633,7 +627,7 @@ class Fs2: HybridFs2Spec {
         try fileManager.setAttributes(attributes, ofItemAtPath: normalizedPath)
         return
       } catch {
-        throw NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "ETOUCH: Failed to touch file at path \(normalizedPath): \(error.localizedDescription)"])
+        throw RuntimeError.error(withMessage: "ETOUCH: Failed to touch file at path \(normalizedPath): \(error.localizedDescription)")
       }
     }
   }

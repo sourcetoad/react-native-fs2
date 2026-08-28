@@ -1,6 +1,6 @@
 import Foundation
 
-enum StreamError: LocalizedError {
+enum StreamError: LocalizedError, CustomStringConvertible {
     case notFound(path: String)
     case accessDenied(path: String)
     case ioError(message: String)
@@ -30,4 +30,9 @@ enum StreamError: LocalizedError {
             return "Buffer error: \(message)"
         }
     }
+
+    /// Nitro converts a thrown Swift `Error` with `String(describing:)`, which reads
+    /// `CustomStringConvertible.description` and ignores `LocalizedError.errorDescription`.
+    /// Without this, JS would receive `invalidStream(streamId: "abc")` instead of the message.
+    var description: String { errorDescription ?? "Unknown stream error" }
 } 

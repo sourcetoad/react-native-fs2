@@ -1,6 +1,6 @@
 package com.margelo.nitro.fs2.utils
 
-sealed class StreamError : Exception() {
+sealed class StreamError : JsVisibleError() {
     data class NotFound(val path: String) : StreamError() {
         override val message: String = "ENOENT: File does not exist: $path"
     }

@@ -1,14 +1,19 @@
 package com.margelo.nitro.fs2
 
 import com.margelo.nitro.core.Promise
+import com.margelo.nitro.fs2.utils.FsError
+import com.margelo.nitro.fs2.utils.JsVisibleError
 import androidx.core.net.toUri
 
 class MediaStore(): HybridMediaStoreSpec() {
     private val mediaStoreManager = RNFSMediaStoreManager()
 
     private fun reject(context: String, ex: Exception): Throwable {
+        // Already a JS-facing error carrying a formatted message - propagate it unchanged.
+        if (ex is JsVisibleError) throw ex
+
         // You can expand this for more specific error types as needed
-        throw Error(ex.message ?: "Error in MediaStore operation: $context")
+        throw FsError(ex.message ?: "Error in MediaStore operation: $context")
     }
 
     override fun mediaStoreCreateFile(
@@ -36,7 +41,7 @@ class MediaStore(): HybridMediaStoreSpec() {
                 if (updated) {
                     return@async uri
                 } else {
-                    throw Error("Failed to update file: $uri")
+                    throw FsError("Failed to update file: $uri")
                 }
             } catch (e: Exception) {
                 throw reject(uri, e)
@@ -51,7 +56,7 @@ class MediaStore(): HybridMediaStoreSpec() {
                 if (success) {
                     return@async
                 } else {
-                    throw Error("Failed to write to file: $uri")
+                    throw FsError("Failed to write to file: $uri")
                 }
             } catch (e: Exception) {
                 throw reject(uri, e)
