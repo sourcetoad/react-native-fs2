@@ -86,22 +86,15 @@ class MediaStore(): HybridMediaStoreSpec() {
     }
 
     override fun mediaStoreQueryFile(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile?> {
-        val queryPromise:Promise<MediaStoreFile?> = Promise()
-
-        try {
-            val file = mediaStoreManager.query(searchOptions)
-
-            if (file != null) {
-                queryPromise.resolve(file)
-            } else {
-                println("File not found: ${searchOptions.fileName}")
-                queryPromise.reject(Error("File not found: ${searchOptions.fileName}"))
+        return Promise.async {
+            try {
+                // The spec types this `Promise<MediaStoreFile | undefined>`, so "no match" is a
+                // resolved `undefined`, not a rejection.
+                return@async mediaStoreManager.query(searchOptions)
+            } catch (e: Exception) {
+                throw reject(searchOptions.fileName ?: "query", e)
             }
-        } catch (e: Exception) {
-            throw reject(searchOptions.fileName ?: "query", e)
         }
-
-        return queryPromise
     }
 
     override fun mediaStoreDeleteFile(uri: String): Promise<Boolean> {
