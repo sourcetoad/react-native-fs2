@@ -489,7 +489,13 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun getAllExternalFilesDirs(): Promise<Array<String>> {
-        return Promise.async { throw FsError("getAllExternalFilesDirs is not supported") }
+        return Promise.async {
+            try {
+                return@async rnfsManager.getAllExternalFilesDirs()
+            } catch (e: Exception) {
+                throw reject("getAllExternalFilesDirs", e)
+            }
+        }
     }
 
     override fun scanFile(path: String): Promise<Array<String>> {

@@ -413,6 +413,18 @@ class RNFSManager(private val context: ReactApplicationContext) {
     }
 
     /**
+     * Every external files directory available to this app, newest API first.
+     *
+     * Ported from master's `RNFSManager.java:570`. `getExternalFilesDirs` returns null entries
+     * for volumes that are currently unavailable, so they are dropped.
+     */
+    fun getAllExternalFilesDirs(): Array<String> =
+        context.getExternalFilesDirs(null)
+            .filterNotNull()
+            .map { it.absolutePath }
+            .toTypedArray()
+
+    /**
      * Asks the platform media scanner to index [path] and reports back once it has.
      *
      * Ported from master's `RNFSManager.java:581`. `MediaScannerConnection.scanFile` is
