@@ -40,6 +40,19 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - State Maps
 
+  /// Guards every dictionary below.
+  ///
+  /// The registries are written from the JS thread (`listenTo*`, `createReadStream`,
+  /// `close*`) and read from the background `Task`s that drive the read and write loops.
+  /// A Swift `Dictionary` is not safe under concurrent access - it can corrupt its storage,
+  /// not merely return a stale value. `BufferPool` in this module already guards its state
+  /// the same way; the maps were simply missed. Android has always used `ConcurrentHashMap`.
+  ///
+  /// Listener closures are looked up *under* the lock and invoked *outside* it - see
+  /// `listener(_:)`. Never `await` inside `withRegistry`: `NSLock` is not reentrant and is
+  /// not tied to a task.
+  private let registryLock = NSLock()
+
   private var readStreams: [String: ReadStreamState] = [:]
   private var writeStreams: [String: WriteStreamState] = [:]
 
@@ -57,6 +70,16 @@ class Fs2Stream: HybridFs2StreamSpec {
   private var writeStreamFinishListeners: [String: (WriteStreamFinishEvent) -> Void] = [:]
   private var writeStreamErrorListeners: [String: (WriteStreamErrorEvent) -> Void] = [:]
 
+  // MARK: - Registry Access
+
+  /// Runs `body` while holding `registryLock`. Must not contain an `await`.
+  @discardableResult
+  private func withRegistry<T>(_ body: () -> T) -> T {
+    registryLock.lock()
+    defer { registryLock.unlock() }
+    return body()
+  }
+
   // MARK: - Read Stream Methods
 
   func createReadStream(path: String, options: ReadStreamOptions?) throws -> NitroModules.Promise<ReadStreamHandle> {
@@ -70,7 +93,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
       let streamId = UUID().uuidString
       let state = ReadStreamState(fileHandle: fileHandle, options: options)
-      self.readStreams[streamId] = state
+      self.withRegistry { self.readStreams[streamId] = state }
       return ReadStreamHandle(streamId: streamId)
     }
   }
@@ -106,7 +129,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       let (stream, continuation) = AsyncStream<(Data, Bool)>.makeStream()
       state.writeBufferStream = stream
       state.writeBufferContinuation = continuation
-      self.writeStreams[streamId] = state
+      self.withRegistry { self.writeStreams[streamId] = state }
 
       // Start background write task
       state.task = Task(priority: .background) { [weak self] in
@@ -119,7 +142,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             try state.fileHandle.write(contentsOf: data)
 
             state.position += Int64(data.count)
-            self.writeStreamProgressListeners[streamId]?(WriteStreamProgressEvent(
+            self.withRegistry { self.writeStreamProgressListeners[streamId] }?(WriteStreamProgressEvent(
               streamId: streamId,
               bytesWritten: state.position,
               lastChunkSize: Int64(data.count)
@@ -137,7 +160,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             }
           }
         } catch {
-          self.writeStreamErrorListeners[streamId]?(WriteStreamErrorEvent(
+          self.withRegistry { self.writeStreamErrorListeners[streamId] }?(WriteStreamErrorEvent(
             streamId: streamId,
             error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
             code: nil
@@ -146,19 +169,19 @@ class Fs2Stream: HybridFs2StreamSpec {
         }
 
         // Cleanup: remove from map, sync and close file, emit finish event, cleanup listeners
-        self.writeStreams.removeValue(forKey: streamId)
+        self.withRegistry { _ = self.writeStreams.removeValue(forKey: streamId) }
         try? state.fileHandle.synchronize()
         try? state.fileHandle.close()
 
-        self.writeStreamFinishListeners[streamId]?(WriteStreamFinishEvent(
+        self.withRegistry { self.writeStreamFinishListeners[streamId] }?(WriteStreamFinishEvent(
           streamId: streamId,
           bytesWritten: state.position,
           success: true
         ))
 
-        self.writeStreamProgressListeners.removeValue(forKey: streamId)
-        self.writeStreamFinishListeners.removeValue(forKey: streamId)
-        self.writeStreamErrorListeners.removeValue(forKey: streamId)
+        self.withRegistry { _ = self.writeStreamProgressListeners.removeValue(forKey: streamId) }
+        self.withRegistry { _ = self.writeStreamFinishListeners.removeValue(forKey: streamId) }
+        self.withRegistry { _ = self.writeStreamErrorListeners.removeValue(forKey: streamId) }
       }
       return WriteStreamHandle(streamId: streamId)
     }
@@ -168,7 +191,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func startReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.readStreams[streamId] else {
+      guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
       }
 
@@ -235,7 +258,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             let data = buffer.prefix(bytesRead)
             let arrayBuffer = try ArrayBuffer.copy(data: data)
 
-            self.readStreamDataListeners[streamId]?(ReadStreamDataEvent(
+            self.withRegistry { self.readStreamDataListeners[streamId] }?(ReadStreamDataEvent(
               streamId: streamId,
               data: arrayBuffer,
               chunk: chunk,
@@ -247,7 +270,7 @@ class Fs2Stream: HybridFs2StreamSpec {
             bytesReadTotal += Int64(bytesRead)
             chunk += 1
 
-            self.readStreamProgressListeners[streamId]?(ReadStreamProgressEvent(
+            self.withRegistry { self.readStreamProgressListeners[streamId] }?(ReadStreamProgressEvent(
               streamId: streamId,
               bytesRead: bytesReadTotal,
               totalBytes: fileLength,
@@ -259,13 +282,13 @@ class Fs2Stream: HybridFs2StreamSpec {
             }
           }
 
-          self.readStreamEndListeners[streamId]?(ReadStreamEndEvent(
+          self.withRegistry { self.readStreamEndListeners[streamId] }?(ReadStreamEndEvent(
             streamId: streamId,
             bytesRead: bytesReadTotal,
             success: true
           ))
         } catch {
-          self.readStreamErrorListeners[streamId]?(ReadStreamErrorEvent(
+          self.withRegistry { self.readStreamErrorListeners[streamId] }?(ReadStreamErrorEvent(
             streamId: streamId,
             error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
             code: nil
@@ -276,12 +299,12 @@ class Fs2Stream: HybridFs2StreamSpec {
         state.task = nil
 
         // Only cleanup if stream wasn't already removed by closeReadStream
-        if self.readStreams.removeValue(forKey: streamId) != nil {
+        if self.withRegistry({ self.readStreams.removeValue(forKey: streamId) }) != nil {
           try? state.fileHandle.close()
-          self.readStreamDataListeners.removeValue(forKey: streamId)
-          self.readStreamProgressListeners.removeValue(forKey: streamId)
-          self.readStreamEndListeners.removeValue(forKey: streamId)
-          self.readStreamErrorListeners.removeValue(forKey: streamId)
+          self.withRegistry { _ = self.readStreamDataListeners.removeValue(forKey: streamId) }
+          self.withRegistry { _ = self.readStreamProgressListeners.removeValue(forKey: streamId) }
+          self.withRegistry { _ = self.readStreamEndListeners.removeValue(forKey: streamId) }
+          self.withRegistry { _ = self.readStreamErrorListeners.removeValue(forKey: streamId) }
         }
       }
     }
@@ -289,7 +312,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func pauseReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.readStreams[streamId] else {
+      guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
       }
       if !state.isActive { return }
@@ -305,7 +328,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func resumeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.readStreams[streamId] else {
+      guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
       }
 
@@ -326,7 +349,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func closeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.readStreams.removeValue(forKey: streamId) else {
+      guard let state = self.withRegistry({ self.readStreams.removeValue(forKey: streamId) }) else {
         throw StreamError.invalidStream(streamId: streamId)
       }
 
@@ -340,16 +363,16 @@ class Fs2Stream: HybridFs2StreamSpec {
       try? state.fileHandle.close()
 
       // Cleanup listeners (task's finally block will skip this since stream was removed)
-      self.readStreamDataListeners.removeValue(forKey: streamId)
-      self.readStreamProgressListeners.removeValue(forKey: streamId)
-      self.readStreamEndListeners.removeValue(forKey: streamId)
-      self.readStreamErrorListeners.removeValue(forKey: streamId)
+      self.withRegistry { _ = self.readStreamDataListeners.removeValue(forKey: streamId) }
+      self.withRegistry { _ = self.readStreamProgressListeners.removeValue(forKey: streamId) }
+      self.withRegistry { _ = self.readStreamEndListeners.removeValue(forKey: streamId) }
+      self.withRegistry { _ = self.readStreamErrorListeners.removeValue(forKey: streamId) }
     }
   }
 
   func isReadStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
     return Promise.async {
-      guard let state = self.readStreams[streamId] else {
+      guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
       }
       return state.isActive
@@ -364,7 +387,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     let copiedBuffer = data.asOwning()
 
     return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
+      guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
@@ -382,7 +405,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func flushWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
+      guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
@@ -392,7 +415,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func closeWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.writeStreams.removeValue(forKey: streamId) else {
+      guard let state = self.withRegistry({ self.writeStreams.removeValue(forKey: streamId) }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
@@ -401,15 +424,15 @@ class Fs2Stream: HybridFs2StreamSpec {
       state.task?.cancel()
       try? state.fileHandle.close()
 
-      self.writeStreamProgressListeners.removeValue(forKey: streamId)
-      self.writeStreamFinishListeners.removeValue(forKey: streamId)
-      self.writeStreamErrorListeners.removeValue(forKey: streamId)
+      self.withRegistry { _ = self.writeStreamProgressListeners.removeValue(forKey: streamId) }
+      self.withRegistry { _ = self.writeStreamFinishListeners.removeValue(forKey: streamId) }
+      self.withRegistry { _ = self.writeStreamErrorListeners.removeValue(forKey: streamId) }
     }
   }
 
   func isWriteStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
     return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
+      guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
       return state.isActive
@@ -418,7 +441,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func getWriteStreamPosition(streamId: String) throws -> NitroModules.Promise<Int64> {
     return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
+      guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
       return state.position
@@ -427,7 +450,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   func endWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
     return Promise.async {
-      guard let state = self.writeStreams[streamId] else {
+      guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
@@ -444,37 +467,37 @@ class Fs2Stream: HybridFs2StreamSpec {
   // MARK: - Event Listener Registration
 
   func listenToReadStreamData(streamId: String, onData: @escaping (ReadStreamDataEvent) -> Void) throws -> () -> Void {
-    readStreamDataListeners[streamId] = onData
-    return { [weak self] in self?.readStreamDataListeners.removeValue(forKey: streamId) }
+    withRegistry { self.readStreamDataListeners[streamId] = onData }
+    return { [weak self] in self?.withRegistry { _ = self?.readStreamDataListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToReadStreamProgress(streamId: String, onProgress: @escaping (ReadStreamProgressEvent) -> Void) throws -> () -> Void {
-    readStreamProgressListeners[streamId] = onProgress
-    return { [weak self] in self?.readStreamProgressListeners.removeValue(forKey: streamId) }
+    withRegistry { self.readStreamProgressListeners[streamId] = onProgress }
+    return { [weak self] in self?.withRegistry { _ = self?.readStreamProgressListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToReadStreamEnd(streamId: String, onEnd: @escaping (ReadStreamEndEvent) -> Void) throws -> () -> Void {
-    readStreamEndListeners[streamId] = onEnd
-    return { [weak self] in self?.readStreamEndListeners.removeValue(forKey: streamId) }
+    withRegistry { self.readStreamEndListeners[streamId] = onEnd }
+    return { [weak self] in self?.withRegistry { _ = self?.readStreamEndListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToReadStreamError(streamId: String, onError: @escaping (ReadStreamErrorEvent) -> Void) throws -> () -> Void {
-    readStreamErrorListeners[streamId] = onError
-    return { [weak self] in self?.readStreamErrorListeners.removeValue(forKey: streamId) }
+    withRegistry { self.readStreamErrorListeners[streamId] = onError }
+    return { [weak self] in self?.withRegistry { _ = self?.readStreamErrorListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToWriteStreamProgress(streamId: String, onProgress: @escaping (WriteStreamProgressEvent) -> Void) throws -> () -> Void {
-    writeStreamProgressListeners[streamId] = onProgress
-    return { [weak self] in self?.writeStreamProgressListeners.removeValue(forKey: streamId) }
+    withRegistry { self.writeStreamProgressListeners[streamId] = onProgress }
+    return { [weak self] in self?.withRegistry { _ = self?.writeStreamProgressListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToWriteStreamFinish(streamId: String, onFinish: @escaping (WriteStreamFinishEvent) -> Void) throws -> () -> Void {
-    writeStreamFinishListeners[streamId] = onFinish
-    return { [weak self] in self?.writeStreamFinishListeners.removeValue(forKey: streamId) }
+    withRegistry { self.writeStreamFinishListeners[streamId] = onFinish }
+    return { [weak self] in self?.withRegistry { _ = self?.writeStreamFinishListeners.removeValue(forKey: streamId) } }
   }
 
   func listenToWriteStreamError(streamId: String, onError: @escaping (WriteStreamErrorEvent) -> Void) throws -> () -> Void {
-    writeStreamErrorListeners[streamId] = onError
-    return { [weak self] in self?.writeStreamErrorListeners.removeValue(forKey: streamId) }
+    withRegistry { self.writeStreamErrorListeners[streamId] = onError }
+    return { [weak self] in self?.withRegistry { _ = self?.writeStreamErrorListeners.removeValue(forKey: streamId) } }
   }
 }
