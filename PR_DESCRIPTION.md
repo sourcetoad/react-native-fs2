@@ -49,7 +49,7 @@ The core API remains backward compatible - most existing code will work without 
 You'll need to add Nitro Modules as a peer dependency:
 ```json
 {
-  "react-native-nitro-modules": "^0.29.7"
+  "react-native-nitro-modules": "^0.37.0"
 }
 ```
 
@@ -159,7 +159,7 @@ New documentation added:
 
 ### 1. Install Dependencies
 ```bash
-yarn add react-native-nitro-modules@^0.29.7
+yarn add react-native-nitro-modules@^0.37.0
 ```
 
 ### 2. Update Imports
@@ -204,8 +204,8 @@ This major release builds upon the foundation of `react-native-fs` and leverages
 ## 📦 Package Info
 
 - **Version**: 4.0.0
-- **React Native**: >=0.80
-- **Nitro Modules**: ^0.29.7
+- **React Native**: >=0.82.0
+- **Nitro Modules**: ^0.37.0
 
 ---
 
