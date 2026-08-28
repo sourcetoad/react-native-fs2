@@ -1,5 +1,6 @@
 package com.margelo.nitro.fs2
 
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -409,6 +410,23 @@ class RNFSManager(private val context: ReactApplicationContext) {
         }
 
         return FSInfo(totalSpace, freeSpace, totalSpaceEx, freeSpaceEx)
+    }
+
+    /**
+     * Asks the platform media scanner to index [path] and reports back once it has.
+     *
+     * Ported from master's `RNFSManager.java:581`. `MediaScannerConnection.scanFile` is
+     * callback-based, so this takes [onComplete] rather than returning a value; `Fs2.scanFile`
+     * bridges it to a `Promise`, the same way `downloadFile` bridges `Downloader`.
+     *
+     * Master resolved the single scanned path. The Nitro spec declares
+     * `scanFile(path): Promise<string[]>` (src/nitro/Fs2.nitro.ts:155), so the path is reported
+     * as a one-element array.
+     */
+    fun scanFile(path: String, onComplete: (Array<String>) -> Unit) {
+        MediaScannerConnection.scanFile(context, arrayOf(path), null) { scannedPath, _ ->
+            onComplete(arrayOf(scannedPath ?: path))
+        }
     }
 
     fun touch(filepath: String, mtime: Long, ctime: Long? = null): Boolean {

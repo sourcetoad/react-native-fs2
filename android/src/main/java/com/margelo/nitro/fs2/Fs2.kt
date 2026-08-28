@@ -493,7 +493,16 @@ class Fs2() : HybridFs2Spec() {
     }
 
     override fun scanFile(path: String): Promise<Array<String>> {
-        return Promise.async { throw FsError("scanFile is not supported") }
+        val scanPromise: Promise<Array<String>> = Promise()
+
+        try {
+            rnfsManager.scanFile(path) { scannedPaths -> scanPromise.resolve(scannedPaths) }
+        } catch (e: Exception) {
+            // The scan itself is asynchronous; only connection setup can fail synchronously.
+            scanPromise.reject(fsError(path, e))
+        }
+
+        return scanPromise
     }
 
     // Private methods
