@@ -1,3 +1,8 @@
+/**
+ * File Streaming API.
+ *
+ * @beta Every export in this module is beta and may change without a major version bump.
+ */
 import { NitroModules } from 'react-native-nitro-modules';
 import type { Fs2Stream } from './nitro/Fs2Stream.nitro';
 import type {
@@ -16,7 +21,6 @@ import {
   encodeContents,
   decodeContents,
   convertFs2StreamOptionsToNitroOptions,
-  convertFs2StreamEventResultsToNitro,
   convertFs2StreamEventResultsToPlain,
 } from './utils';
 import type {
@@ -89,6 +93,8 @@ async function getWriteStreamPositionAsNumber(
 
 /**
  * Create a read stream for efficiently reading large files in chunks
+ *
+ * @beta
  */
 export async function createReadStream(
   path: string,
@@ -113,6 +119,8 @@ export async function createReadStream(
 
 /**
  * Create a write stream for efficiently writing large files in chunks
+ *
+ * @beta
  */
 export async function createWriteStream(
   path: string,
@@ -138,6 +146,13 @@ export async function createWriteStream(
 
 /**
  * Listen for data chunks from a read stream
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToReadStreamData(
   streamId: string,
@@ -154,6 +169,13 @@ export function listenToReadStreamData(
 
 /**
  * Listen for progress updates from a read stream
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToReadStreamProgress(
   streamId: string,
@@ -169,6 +191,13 @@ export function listenToReadStreamProgress(
 
 /**
  * Listen for read stream completion
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToReadStreamEnd(
   streamId: string,
@@ -184,6 +213,13 @@ export function listenToReadStreamEnd(
 
 /**
  * Listen for read stream errors
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToReadStreamError(
   streamId: string,
@@ -194,6 +230,13 @@ export function listenToReadStreamError(
 
 /**
  * Listen for write stream progress
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToWriteStreamProgress(
   streamId: string,
@@ -212,6 +255,13 @@ export function listenToWriteStreamProgress(
 
 /**
  * Listen for write stream completion
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToWriteStreamFinish(
   streamId: string,
@@ -227,6 +277,13 @@ export function listenToWriteStreamFinish(
 
 /**
  * Listen for write stream errors
+ *
+ * Only one subscriber per (stream, event) is supported: registering a second callback for
+ * the same stream replaces the first, and either returned unsubscribe removes whichever is
+ * currently installed. In particular, do not subscribe to a stream that
+ * `copyFileWithProgress` or `processFileInChunks` is already driving.
+ *
+ * @beta
  */
 export function listenToWriteStreamError(
   streamId: string,
@@ -237,6 +294,8 @@ export function listenToWriteStreamError(
 
 /**
  * Utility function to convert ArrayBuffer to string based on encoding
+ *
+ * @beta
  */
 export function arrayBufferToString(
   buffer: ArrayBuffer,
@@ -253,6 +312,8 @@ export function arrayBufferToString(
 
 /**
  * Utility function to convert string to ArrayBuffer based on encoding
+ *
+ * @beta
  */
 export function stringToArrayBuffer(
   str: string,
@@ -262,7 +323,12 @@ export function stringToArrayBuffer(
 }
 
 /**
- * Utility function to concatenate ArrayBuffers
+ * Concatenates two ArrayBuffers.
+ *
+ * Prefer collecting chunks in an array and calling {@link concatenateChunks} once: calling
+ * this in a loop reallocates and recopies everything accumulated so far on every chunk.
+ *
+ * @beta
  */
 export function concatenateArrayBuffers(
   buffer1: ArrayBuffer,
@@ -276,54 +342,135 @@ export function concatenateArrayBuffers(
 }
 
 /**
- * High-level utility function to read a file as text or binary using streams
+ * Joins chunks into one ArrayBuffer with a single allocation and a single pass.
+ *
+ * @beta
+ */
+export function concatenateChunks(chunks: ArrayBuffer[]): ArrayBuffer {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.byteLength;
+
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(new Uint8Array(chunk), offset);
+    offset += chunk.byteLength;
+  }
+  return combined.buffer;
+}
+
+/**
+ * Default chunk size for the high-level helpers, in bytes.
+ *
+ * Each chunk costs one JSI callback, so a small size dominates the cost of a large read:
+ * at the previous 128 bytes a 10 MB file produced ~78,000 round trips.
+ */
+const DEFAULT_STREAM_BUFFER_SIZE = 64 * 1024;
+
+/**
+ * How many chunks may sit un-written before the read stream is paused.
+ *
+ * Native does not await the data callback, so without this the reader runs ahead of the
+ * writer without bound.
+ */
+const DEFAULT_HIGH_WATER_MARK = 8;
+
+/**
+ * Closes a stream, ignoring "no such stream".
+ *
+ * Native drops its registry entry when a read loop finishes on its own, so closing after
+ * `end` reports an unknown stream. That is the normal path, not a failure.
+ */
+async function closeQuietly(stream: {
+  close: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await stream.close();
+  } catch {
+    // Intentionally ignored - see above.
+  }
+}
+
+/**
+ * Reads a whole file through a stream and returns it as text or binary.
+ *
+ * Chunks are collected and joined once, then decoded once over the assembled buffer. Decoding
+ * per chunk would corrupt any multi-byte character that straddles a chunk boundary.
+ *
+ * @beta
  */
 export async function readStream(
   filePath: string,
-  encoding: Encoding = 'arraybuffer'
+  encoding: Encoding = 'arraybuffer',
+  options: { bufferSize?: number } = {}
 ): Promise<string | ArrayBuffer> {
-  const stream = await createReadStream(filePath, { bufferSize: 128 });
-  let content: string | ArrayBuffer =
-    encoding === 'arraybuffer' ? new ArrayBuffer(0) : '';
+  const stream = await createReadStream(filePath, {
+    bufferSize: options.bufferSize ?? DEFAULT_STREAM_BUFFER_SIZE,
+  });
 
   return new Promise<string | ArrayBuffer>((resolve, reject) => {
-    const unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
+    const chunks: ArrayBuffer[] = [];
+    let settled = false;
+
+    let unsubscribeData: (() => void) | null = null;
+    let unsubscribeEnd: (() => void) | null = null;
+    let unsubscribeError: (() => void) | null = null;
+
+    const cleanup = () => {
+      unsubscribeData?.();
+      unsubscribeEnd?.();
+      unsubscribeError?.();
+    };
+
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      closeQuietly(stream);
+      reject(error);
+    };
+
+    unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
+      if (settled) return;
+      chunks.push(event.data);
+    });
+
+    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      closeQuietly(stream);
+
+      const assembled = concatenateChunks(chunks);
       if (encoding === 'arraybuffer') {
-        // Concatenate ArrayBuffers
-        content = concatenateArrayBuffers(content as ArrayBuffer, event.data);
-      } else {
-        // Decode chunk and append to string
-        const chunk = decodeContents(event.data, encoding);
-        if (typeof chunk !== 'string') {
-          reject(new Error('Failed to decode chunk as string'));
+        resolve(assembled);
+        return;
+      }
+
+      try {
+        const decoded = decodeContents(assembled, encoding);
+        if (typeof decoded !== 'string') {
+          reject(new Error('Failed to decode file contents as string'));
           return;
         }
-        content += chunk;
+        resolve(decoded);
+      } catch (error) {
+        reject(error);
       }
     });
 
-    const unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
-      unsubscribeData();
-      unsubscribeEnd();
-      resolve(content);
-    });
-
-    const unsubscribeError = listenToReadStreamError(
-      stream.streamId,
-      (event) => {
-        unsubscribeData();
-        unsubscribeEnd();
-        unsubscribeError();
-        reject(new Error(event.error));
-      }
+    unsubscribeError = listenToReadStreamError(stream.streamId, (event) =>
+      fail(new Error(event.error))
     );
 
-    stream.start().catch(reject);
+    stream.start().catch(fail);
   });
 }
 
 /**
- * High-level utility function to write text or binary using streams
+ * Writes text or binary to a file through a stream.
+ *
+ * @beta
  */
 export async function writeStream(
   filePath: string,
@@ -333,32 +480,56 @@ export async function writeStream(
   const stream = await createWriteStream(filePath);
 
   return new Promise<void>((resolve, reject) => {
-    const unsubscribeFinish = listenToWriteStreamFinish(stream.streamId, () => {
-      unsubscribeFinish();
-      resolve();
-    });
+    let settled = false;
 
-    const unsubscribeError = listenToWriteStreamError(
-      stream.streamId,
-      (event) => {
-        unsubscribeFinish();
-        unsubscribeError();
-        reject(new Error(event.error));
-      }
+    let unsubscribeFinish: (() => void) | null = null;
+    let unsubscribeError: (() => void) | null = null;
+
+    const cleanup = () => {
+      unsubscribeFinish?.();
+      unsubscribeError?.();
+    };
+
+    const settle = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+
+    unsubscribeFinish = listenToWriteStreamFinish(stream.streamId, () =>
+      settle()
     );
 
-    // Encode if needed
-    const buffer =
-      typeof data === 'string' ? encodeContents(data, encoding) : data;
+    unsubscribeError = listenToWriteStreamError(stream.streamId, (event) =>
+      settle(new Error(event.error))
+    );
+
+    let buffer: ArrayBuffer;
+    try {
+      buffer = typeof data === 'string' ? encodeContents(data, encoding) : data;
+    } catch (error) {
+      settle(error);
+      return;
+    }
+
     stream
       .write(buffer)
       .then(() => stream.end())
-      .catch(reject);
+      .catch(settle);
   });
 }
 
 /**
- * High-level utility function to copy a file using streams with progress
+ * Copies a file through a read stream and a write stream, reporting progress.
+ *
+ * Writes are serialised: native does not await the data callback, so issuing each
+ * `write()` as the chunk arrives lets several be in flight at once and the destination can
+ * be assembled out of order. Chunks are chained so at most one write is outstanding, and the
+ * read stream is paused once more than `highWaterMark` chunks are waiting.
+ *
+ * @beta
  */
 export async function copyFileWithProgress(
   sourcePath: string,
@@ -366,18 +537,32 @@ export async function copyFileWithProgress(
   options: {
     bufferSize?: number;
     onProgress?: (progress: number) => void;
+    /** Chunks allowed to queue before the read stream is paused. Defaults to 8. */
+    highWaterMark?: number;
   } = {}
 ): Promise<void> {
-  const { bufferSize = 16384, onProgress } = options;
+  const {
+    bufferSize = DEFAULT_STREAM_BUFFER_SIZE,
+    onProgress,
+    highWaterMark = DEFAULT_HIGH_WATER_MARK,
+  } = options;
 
-  const readStream = await createReadStream(sourcePath, { bufferSize });
-  const writeStream = await createWriteStream(destPath, { bufferSize });
+  const readStreamHandle = await createReadStream(sourcePath, { bufferSize });
+  const writeStreamHandle = await createWriteStream(destPath, { bufferSize });
 
   return new Promise<void>((resolve, reject) => {
+    const lowWaterMark = Math.max(1, Math.floor(highWaterMark / 2));
+
     let unsubscribeData: (() => void) | null = null;
     let unsubscribeProgress: (() => void) | null = null;
     let unsubscribeEnd: (() => void) | null = null;
     let unsubscribeError: (() => void) | null = null;
+
+    let queued = 0;
+    let paused = false;
+    let settled = false;
+    // Serialises writes: each chunk waits for the previous one to land.
+    let writeChain: Promise<void> = Promise.resolve();
 
     const cleanup = () => {
       unsubscribeData?.();
@@ -386,105 +571,150 @@ export async function copyFileWithProgress(
       unsubscribeError?.();
     };
 
-    // Forward read data to write stream
+    // Async, but never rejects - it always ends in `resolve` or `reject` - so call sites
+    // deliberately do not await it.
+    const settle = async (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+
+      // Close both handles on every exit path, including the happy one.
+      let closeError: unknown;
+      try {
+        await writeStreamHandle.close();
+      } catch (e) {
+        closeError = e;
+      }
+      await closeQuietly(readStreamHandle);
+
+      if (error) reject(error);
+      else if (closeError) reject(closeError);
+      else resolve();
+    };
+
     unsubscribeData = listenToReadStreamData(
-      readStream.streamId,
-      async (event) => {
-        try {
-          await writeStream.write(event.data);
-        } catch (error) {
-          cleanup();
-          reject(error);
+      readStreamHandle.streamId,
+      (event) => {
+        if (settled) return;
+
+        queued += 1;
+        if (!paused && queued >= highWaterMark) {
+          paused = true;
+          // Pause is best-effort: it reports an unknown stream once the read loop has
+          // already finished, which is not a failure worth propagating.
+          readStreamHandle.pause().catch(() => {});
         }
+
+        writeChain = writeChain
+          .then(async () => {
+            if (settled) return;
+            await writeStreamHandle.write(event.data);
+            queued -= 1;
+
+            if (paused && queued <= lowWaterMark) {
+              paused = false;
+              await readStreamHandle.resume().catch(() => {});
+            }
+          })
+          .catch((error) => {
+            settle(error);
+          });
       }
     );
 
-    // Track progress
     if (onProgress) {
       unsubscribeProgress = listenToReadStreamProgress(
-        readStream.streamId,
-        (event) => {
-          onProgress(event.progress);
-        }
+        readStreamHandle.streamId,
+        (event) => onProgress(event.progress)
       );
     }
 
-    // Handle completion
-    unsubscribeEnd = listenToReadStreamEnd(readStream.streamId, async () => {
-      try {
-        await writeStream.close();
-        cleanup();
-        resolve();
-      } catch (error) {
-        cleanup();
-        reject(error);
+    unsubscribeEnd = listenToReadStreamEnd(readStreamHandle.streamId, () => {
+      // The reader is done, but queued writes may not be. Settle behind them.
+      writeChain = writeChain.then(() => settle());
+    });
+
+    unsubscribeError = listenToReadStreamError(
+      readStreamHandle.streamId,
+      (event) => {
+        settle(new Error(event.error));
       }
-    });
+    );
 
-    // Handle errors
-    unsubscribeError = listenToReadStreamError(readStream.streamId, (event) => {
-      cleanup();
-      reject(new Error(event.error));
+    readStreamHandle.start().catch((error) => {
+      settle(error);
     });
-
-    // Start the copy
-    readStream.start().catch(reject);
   });
 }
 
 /**
- * Stream-based file reading with chunk processing
+ * Reads a file through a stream, handing each chunk to `chunkProcessor`.
+ *
+ * The processor is awaited before the next chunk is handed over, so chunks are always
+ * processed in order even though native does not await the data callback.
+ *
+ * @beta
  */
 export async function processFileInChunks(
   filePath: string,
   chunkProcessor: (
     chunk: ArrayBuffer,
-    chunkIndex: bigint,
-    position: bigint
+    chunkIndex: number,
+    position: number
   ) => Promise<void> | void,
   options: ReadStreamOptions = {}
 ): Promise<void> {
-  const stream = await createReadStream(filePath, options);
+  const stream = await createReadStream(filePath, {
+    bufferSize: DEFAULT_STREAM_BUFFER_SIZE,
+    ...options,
+  });
 
   return new Promise<void>((resolve, reject) => {
-    const unsubscribeData = listenToReadStreamData(
-      stream.streamId,
-      async (event) => {
-        const eventNitro = convertFs2StreamEventResultsToNitro(
-          event
-        ) as ReadStreamDataEventNitro;
+    let settled = false;
+    let processChain: Promise<void> = Promise.resolve();
 
-        try {
-          await chunkProcessor(
-            eventNitro.data,
-            eventNitro.chunk,
-            eventNitro.position
-          );
-        } catch (error) {
-          unsubscribeData();
-          unsubscribeEnd();
-          unsubscribeError();
-          reject(error);
-        }
-      }
-    );
+    let unsubscribeData: (() => void) | null = null;
+    let unsubscribeEnd: (() => void) | null = null;
+    let unsubscribeError: (() => void) | null = null;
 
-    const unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
-      unsubscribeData();
-      unsubscribeEnd();
-      resolve();
+    const cleanup = () => {
+      unsubscribeData?.();
+      unsubscribeEnd?.();
+      unsubscribeError?.();
+    };
+
+    const settle = async (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      await closeQuietly(stream);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
+      if (settled) return;
+
+      processChain = processChain
+        .then(async () => {
+          if (settled) return;
+          await chunkProcessor(event.data, event.chunk, event.position);
+        })
+        .catch((error) => {
+          settle(error);
+        });
     });
 
-    const unsubscribeError = listenToReadStreamError(
-      stream.streamId,
-      (event) => {
-        unsubscribeData();
-        unsubscribeEnd();
-        unsubscribeError();
-        reject(new Error(event.error));
-      }
-    );
+    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
+      processChain = processChain.then(() => settle());
+    });
 
-    stream.start().catch(reject);
+    unsubscribeError = listenToReadStreamError(stream.streamId, (event) => {
+      settle(new Error(event.error));
+    });
+
+    stream.start().catch((error) => {
+      settle(error);
+    });
   });
 }
