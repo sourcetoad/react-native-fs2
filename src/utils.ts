@@ -10,10 +10,28 @@ import type {
 } from './types';
 
 /**
+ * Copies a `Buffer`'s bytes out into a standalone `ArrayBuffer`.
+ *
+ * `Buffer#buffer` is not necessarily the payload: Node allocates small buffers out of a shared
+ * pool, so the bytes live at `byteOffset` for `byteLength`. Reading `.buffer` directly happens
+ * to work with the `buffer` npm shim React Native resolves, and silently returns the whole
+ * pool - up to 8 KB of unrelated data - under Node, which is what any Node-based test or SSR
+ * path uses.
+ */
+function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength
+  ) as ArrayBuffer;
+}
+
+/**
  * Encodes content to ArrayBuffer based on encoding type
  */
 export function encodeContents(
-  content: string | ArrayBuffer,
+  // `ArrayBufferView` is accepted for the `arraybuffer` encoding - the body has always
+  // handled TypedArrays, the signature just did not say so.
+  content: string | ArrayBuffer | ArrayBufferView,
   encodingType: Encoding
 ): ArrayBuffer {
   if (!content && content !== '') {
@@ -25,19 +43,19 @@ export function encodeContents(
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for utf8 encoding');
       }
-      return Buffer.from(content, 'utf8').buffer as ArrayBuffer;
+      return bufferToArrayBuffer(Buffer.from(content, 'utf8'));
 
     case 'ascii':
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for ascii encoding');
       }
-      return Buffer.from(content, 'ascii').buffer as ArrayBuffer;
+      return bufferToArrayBuffer(Buffer.from(content, 'ascii'));
 
     case 'base64':
       if (typeof content !== 'string') {
         throw new Error('Content must be a string for base64 encoding');
       }
-      return Buffer.from(content, 'base64').buffer as ArrayBuffer;
+      return bufferToArrayBuffer(Buffer.from(content, 'base64'));
 
     case 'arraybuffer':
       if (content instanceof ArrayBuffer) {
@@ -173,10 +191,14 @@ export function convertFs2StreamOptionsToNitroOptions(
   options: StreamOptionPlain
 ): StreamOptionNitro {
   return Object.fromEntries(
-    Object.entries(options).map(([key, value]) => [
-      key,
-      mapPropsWithBigInt.includes(key) ? numberToBigInt(value) : value,
-    ])
+    Object.entries(options)
+      // An explicitly-passed `{ start: undefined }` is the same as omitting it. Without this
+      // the value reaches `BigInt(undefined)`, which throws a TypeError.
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [
+        key,
+        mapPropsWithBigInt.includes(key) ? numberToBigInt(value) : value,
+      ])
   ) as StreamOptionNitro;
 }
 
