@@ -58,7 +58,9 @@ class RNFSMediaStoreManager {
                     MediaCollectionType.DOWNLOAD -> Environment.DIRECTORY_DOWNLOADS
                 }
             } else {
-                throw UnsupportedOperationException("Android version not supported")
+                throw UnsupportedOperationException(
+                "ENOTSUP: MediaStore requires Android 10 (API 29) or newer"
+            )
             }
         }
     }
@@ -89,7 +91,9 @@ class RNFSMediaStoreManager {
         mediaType: MediaCollectionType
     ): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
-            throw UnsupportedOperationException("Android version not supported")
+            throw UnsupportedOperationException(
+                "ENOTSUP: MediaStore requires Android 10 (API 29) or newer"
+            )
         val resolver = context.contentResolver
         val fileDetails =
             ContentValues().apply {
@@ -124,7 +128,9 @@ class RNFSMediaStoreManager {
 
     fun writeToMediaFile(fileUri: Uri, filePath: String, transformFile: Boolean = false): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
-            throw UnsupportedOperationException("Android version not supported")
+            throw UnsupportedOperationException(
+                "ENOTSUP: MediaStore requires Android 10 (API 29) or newer"
+            )
         val resolver = context.contentResolver
         try {
             getSourceInputStream(filePath).use { source ->
@@ -152,7 +158,9 @@ class RNFSMediaStoreManager {
 
     fun copyToMediaStore(file: FileDescription, mediaType: MediaCollectionType, path: String): Uri {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
-            throw UnsupportedOperationException("Android version not supported")
+            throw UnsupportedOperationException(
+                "ENOTSUP: MediaStore requires Android 10 (API 29) or newer"
+            )
         val resolver = context.contentResolver
         try {
             getSourceInputStream(path).close()
@@ -189,7 +197,9 @@ class RNFSMediaStoreManager {
 
     fun query(query: MediaStoreSearchOptions): MediaStoreFile? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
-            throw UnsupportedOperationException("Android version not supported")
+            throw UnsupportedOperationException(
+                "ENOTSUP: MediaStore requires Android 10 (API 29) or newer"
+            )
         var cursor: Cursor? = null
 
         try {
