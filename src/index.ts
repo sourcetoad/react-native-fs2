@@ -3,25 +3,26 @@ import type { Fs2 } from './nitro/Fs2.nitro';
 import type {
   MkdirOptions,
   FSInfoResult,
-  ReadDirItem,
+  ReadDirItem as NativeReadDirItem,
   DownloadFileOptions,
   DownloadEventResult,
   NativeStatResult,
   HashAlgorithm,
 } from './nitro/Fs2.nitro';
-import type { EncodingOrOptions, StatResult } from './types';
+import type { EncodingOrOptions, ReadDirItem, StatResult } from './types';
 
 /**
  * Re-export types
  */
 export type {
-  ReadDirItem,
   StatResultType,
   MkdirOptions,
   FSInfoResult,
   DownloadFileOptions,
   DownloadEventResult,
 } from './nitro/Fs2.nitro';
+
+export type { ReadDirItem, StatResult } from './types';
 
 export type {
   MediaCollectionType,
@@ -110,7 +111,18 @@ const compat = {
   },
 
   readDir(dirPath: string): Promise<ReadDirItem[]> {
-    return RNFS2Nitro.readDir(normalizeFilePath(dirPath));
+    return RNFS2Nitro.readDir(normalizeFilePath(dirPath)).then(
+      (items: NativeReadDirItem[]) =>
+        items.map((item) => ({
+          name: item.name,
+          path: item.path,
+          size: item.size,
+          mtime: item.mtime,
+          ctime: item.ctime,
+          isFile: () => item.isFile,
+          isDirectory: () => item.isDirectory,
+        }))
+    );
   },
 
   stat(filepath: string): Promise<StatResult> {

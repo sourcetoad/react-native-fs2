@@ -11,6 +11,23 @@ import type {
 export type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
 export type EncodingOrOptions = Encoding | { encoding?: Encoding };
 
+/**
+ * A `readDir` entry.
+ *
+ * `isFile`/`isDirectory` are accessors rather than plain booleans so that this matches
+ * `StatResult` and the 3.x API. The Nitro struct the native layer returns
+ * (`NativeReadDirItem`) carries them as booleans; `readDir` wraps them.
+ */
+export type ReadDirItem = {
+  name: string; // The name of the item
+  path: string; // The absolute path to the item
+  size: number; // Size in bytes
+  mtime: number; // Last modified date
+  ctime?: number; // Created date (best effort; iOS provides it, Android reuses mtime)
+  isFile: () => boolean; // Is the item just a file?
+  isDirectory: () => boolean; // Is the item a directory?
+};
+
 export type StatResult = {
   type?: any; // TODO
   name?: string; // The name of the item
