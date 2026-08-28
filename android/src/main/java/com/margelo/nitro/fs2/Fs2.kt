@@ -183,7 +183,7 @@ class Fs2() : HybridFs2Spec() {
             copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
-            return Promise.rejected(reject(path, e))
+            return Promise.rejected(fsError(path, e))
         }
 
         return Promise.async {
@@ -218,7 +218,7 @@ class Fs2() : HybridFs2Spec() {
             copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
-            return Promise.rejected(reject(filepath, e))
+            return Promise.rejected(fsError(filepath, e))
         }
 
         return Promise.async {
@@ -241,7 +241,7 @@ class Fs2() : HybridFs2Spec() {
                 rnfsManager.appendFile(filepath, byteArray)
                 return@async
             } catch (e: Exception) {
-                reject(filepath, e)
+                throw reject(filepath, e)
             }
         }
     }
@@ -253,7 +253,7 @@ class Fs2() : HybridFs2Spec() {
             copiedBuffer = data.asOwning()
         } catch (e: Exception) {
             // If copying fails, reject immediately
-            return Promise.rejected(reject(filepath, e))
+            return Promise.rejected(fsError(filepath, e))
         }
 
         return Promise.async {
@@ -400,7 +400,7 @@ class Fs2() : HybridFs2Spec() {
                 )
             )
 
-            downloadPromise.reject(reject(options.toFile, e)) // Also rethrow for the promise rejection
+            downloadPromise.reject(fsError(options.toFile, e))
         }
 
         return downloadPromise
@@ -497,21 +497,35 @@ class Fs2() : HybridFs2Spec() {
     }
 
     // Private methods
-    private fun reject(filepath: String, ex: Exception): Throwable {
+
+    /**
+     * Builds the JS-facing error for [ex] without throwing it.
+     *
+     * Use this wherever the error has to be handed to something else - `Promise.rejected`,
+     * `Promise.reject` - and [reject] wherever it should propagate out of the current frame.
+     */
+    private fun fsError(filepath: String, ex: Exception): Throwable {
         // Already a JS-facing error carrying a formatted "CODE: message" - propagate it
         // unchanged. Without this it would be re-wrapped as "EUNSPECIFIED: CODE: message".
-        if (ex is JsVisibleError) throw ex
+        if (ex is JsVisibleError) return ex
 
         if (ex is FileNotFoundException) {
-            throw FsError("ENOENT: no such file or directory, open '$filepath'")
+            return FsError("ENOENT: no such file or directory, open '$filepath'")
         }
 
         if (ex is IORejectionException) {
-            throw FsError("${ex.code}: ${ex.message}")
+            return FsError("${ex.code}: ${ex.message}")
         }
 
-        throw FsError("EUNSPECIFIED: ${ex.message ?: ex.toString()}")
+        return FsError("EUNSPECIFIED: ${ex.message ?: ex.toString()}")
     }
+
+    /**
+     * Throws the JS-facing error for [ex]. Declared [Nothing] because every path throws -
+     * typing it `Throwable` made `Promise.rejected(reject(...))` look like a rejected promise
+     * when it was really a synchronous throw.
+     */
+    private fun reject(filepath: String, ex: Exception): Nothing = throw fsError(filepath, ex)
 
     // Convert Map<String, String> to ReadableMap for React Native bridge
     private fun convertHeadersToReadableMap(headers: Map<String, String>?): ReadableMap? {

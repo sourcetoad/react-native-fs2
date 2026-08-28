@@ -8,13 +8,19 @@ import androidx.core.net.toUri
 class MediaStore(): HybridMediaStoreSpec() {
     private val mediaStoreManager = RNFSMediaStoreManager()
 
-    private fun reject(context: String, ex: Exception): Throwable {
+    /**
+     * Builds the JS-facing error for [ex] without throwing it. See `Fs2.fsError`.
+     */
+    private fun fsError(context: String, ex: Exception): Throwable {
         // Already a JS-facing error carrying a formatted message - propagate it unchanged.
-        if (ex is JsVisibleError) throw ex
+        if (ex is JsVisibleError) return ex
 
         // You can expand this for more specific error types as needed
-        throw FsError(ex.message ?: "Error in MediaStore operation: $context")
+        return FsError(ex.message ?: "Error in MediaStore operation: $context")
     }
+
+    /** Throws the JS-facing error for [ex]. Every path throws, hence [Nothing]. */
+    private fun reject(context: String, ex: Exception): Nothing = throw fsError(context, ex)
 
     override fun mediaStoreCreateFile(
         fileDescription: FileDescription,
