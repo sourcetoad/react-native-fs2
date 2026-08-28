@@ -81,6 +81,7 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   readonly externalStorageDirectoryPath: string; // Android only
   readonly temporaryDirectoryPath: string;
   readonly libraryDirectoryPath: string; // iOS only
+  readonly mainBundlePath: string; // iOS only
   readonly picturesDirectoryPath: string;
 
   // File System Operations

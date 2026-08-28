@@ -50,6 +50,7 @@ class Fs2() : HybridFs2Spec() {
     override val temporaryDirectoryPath: String =
         RNFSManager.getTemporaryDirectoryPath(reactContext)
     override val libraryDirectoryPath: String = "" // Not available on Android
+    override val mainBundlePath: String = "" // Not available on Android
     override val picturesDirectoryPath: String = RNFSManager.getPicturesDirectoryPath()
 
     override fun mkdir(filepath: String, options: MkdirOptions?): Promise<Unit> {

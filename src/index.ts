@@ -314,6 +314,7 @@ const compat = {
   ExternalStorageDirectoryPath: RNFS2Nitro.externalStorageDirectoryPath,
   TemporaryDirectoryPath: RNFS2Nitro.temporaryDirectoryPath,
   LibraryDirectoryPath: RNFS2Nitro.libraryDirectoryPath,
+  MainBundlePath: RNFS2Nitro.mainBundlePath,
   PicturesDirectoryPath: RNFS2Nitro.picturesDirectoryPath,
 };
 

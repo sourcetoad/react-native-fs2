@@ -7,6 +7,7 @@ class Fs2: HybridFs2Spec {
   public let documentDirectoryPath: String
   public let temporaryDirectoryPath: String
   public let libraryDirectoryPath: String
+  public let mainBundlePath: String
   public let picturesDirectoryPath: String
   public let externalCachesDirectoryPath: String = ""
   public let downloadDirectoryPath: String = ""
@@ -39,6 +40,7 @@ class Fs2: HybridFs2Spec {
     self.temporaryDirectoryPath = NSTemporaryDirectory()
     self.libraryDirectoryPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.path ?? ""
     self.picturesDirectoryPath = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first?.path ?? ""
+    self.mainBundlePath = Bundle.main.bundlePath
     super.init()
     self.downloader.delegate = self
   }
