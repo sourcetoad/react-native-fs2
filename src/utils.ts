@@ -158,7 +158,7 @@ export function bigIntToNumber(bigint: bigint): number {
 export const mapPropsWithBigInt: string[] = [
   'start',
   'end',
-  'chunks',
+  'chunk',
   'position',
   'bytesRead',
   'totalBytes',
