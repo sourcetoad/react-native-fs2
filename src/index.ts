@@ -79,9 +79,13 @@ const downloadListeners = {
  * convert at this boundary exactly as 3.x did (master:src/index.ts:209-210, 224-225) rather
  * than leaving every caller to remember the factor. `undefined` passes through untouched:
  * Android's `readDir` does not populate `ctime`.
+ *
+ * Rounded because iOS carries sub-second precision - `stat` there is a `Double`
+ * `timeIntervalSince1970`, so the raw product is fractional (1788157346187.1887) while Android
+ * is always whole. A timestamp "in milliseconds" should be an integer on both.
  */
 const secondsToMs = <T extends number | undefined>(seconds: T): T =>
-  (seconds === undefined ? undefined : seconds * 1000) as T;
+  (seconds === undefined ? undefined : Math.round(seconds * 1000)) as T;
 
 /**
  * Legacy-compatible API
