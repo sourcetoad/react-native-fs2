@@ -389,7 +389,10 @@ Metro dev server, which is running whenever the example app is.
 
 - **iOS background downloads are unusable** without `completeHandlerIOS` — a deferred
   maintainer decision, not an oversight. See section 4.
-- **iOS file protection is only partly verified.** Restored on `writeFile`, `moveFile` and
-  `copyFile` on this branch, and `verify.ts` confirms on device that the option is accepted and
-  the file survives. Nothing in the public API reads a protection class back, so no check
-  asserts the class was actually applied.
+- **iOS file protection is not verified at all, only wired.** Restored on `writeFile`,
+  `moveFile` and `copyFile` on this branch, and `verify.ts` confirms the option is accepted and
+  the file survives. That is the limit of it, for two compounding reasons: nothing in the public
+  API reads a protection class back, and the iOS Simulator does not implement Data Protection —
+  a file written with `NSFileProtectionComplete` is a plain `-rw-r--r--` file in the container,
+  readable as cleartext from the host with no extended attributes. Those checks would pass
+  identically if the option were wired to nothing. Confirming it needs a physical device.
