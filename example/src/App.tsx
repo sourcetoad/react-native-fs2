@@ -11,6 +11,8 @@ import {
   PermissionsAndroid,
 } from 'react-native';
 import { getTestFolder, requestAndroidPermission } from './utils';
+import { useEffect, useState } from 'react';
+import { runVerification, type Report } from './verify';
 
 /**
  * Examples
@@ -22,6 +24,17 @@ import Example4 from './example4';
 import Example5 from './example5';
 
 const App = () => {
+  // Runs the on-device verification once on launch and renders the result. The unit suite
+  // mocks native, so this is the only thing that exercises the Swift and Kotlin fixes.
+  const [report, setReport] = useState<Report | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    runVerification()
+      .then(setReport)
+      .catch((e) => setVerifyError(e?.message ?? String(e)));
+  }, []);
+
   // methods
   const cleanExampleFilesAndFolders = async () => {
     try {
@@ -81,6 +94,45 @@ const App = () => {
             </View>
           </View>
 
+          <View style={styles.verifyBox}>
+            <Text style={styles.subTitle}>On-device verification</Text>
+            {verifyError && (
+              <Text style={styles.verifyFail}>
+                harness error: {verifyError}
+              </Text>
+            )}
+            {!report && !verifyError && <Text>running…</Text>}
+            {report && (
+              <>
+                <Text
+                  style={report.failed ? styles.verifyFail : styles.verifyPass}
+                >
+                  {report.passed} passed · {report.failed} failed ·{' '}
+                  {report.skipped} skipped
+                </Text>
+                {report.checks.map((c) => (
+                  <Text
+                    key={c.name}
+                    style={
+                      c.status === 'fail'
+                        ? styles.verifyFail
+                        : c.status === 'skip'
+                          ? styles.verifySkip
+                          : styles.verifyPass
+                    }
+                  >
+                    {c.status === 'pass'
+                      ? '✓'
+                      : c.status === 'fail'
+                        ? '✗'
+                        : '–'}{' '}
+                    {c.name} — {c.detail}
+                  </Text>
+                ))}
+              </>
+            )}
+          </View>
+
           <Example1 />
           <Example2 />
           <Example3 />
@@ -93,6 +145,17 @@ const App = () => {
 };
 
 const styles = StyleSheet.create({
+  verifyBox: {
+    width: '100%',
+    marginVertical: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+  },
+  verifyPass: { color: '#137333', fontSize: 12 },
+  verifyFail: { color: '#c5221f', fontSize: 12, fontWeight: '700' },
+  verifySkip: { color: '#8a8a8a', fontSize: 12 },
   title: {
     fontSize: 25,
   },
