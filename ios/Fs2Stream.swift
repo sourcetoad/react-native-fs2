@@ -4,16 +4,61 @@ import NitroModules
 class Fs2Stream: HybridFs2StreamSpec {
   // MARK: - State Definitions
 
+  /// Every mutable field on the two state classes below is written from the JS thread
+  /// (`pause`, `resume`, `close`, `write`) and read from the background `Task` that drives the
+  /// read or write loop. Left unsynchronised that is a data race, which Thread Sanitizer
+  /// confirmed on `isPaused` - written by `resumeReadStream`, read by the read loop's
+  /// `while`/`if`. A torn `Bool` is not the real hazard on arm64; the compiler hoisting a
+  /// non-atomic read out of `while state.isActive { if state.isPaused ... }` is, because that
+  /// would make pause stop working entirely under optimisation.
+  ///
+  /// Each accessor takes the lock for a single field access and releases it immediately. No
+  /// critical section spans an `await`, so the background tasks cannot deadlock against the
+  /// JS thread.
   private class ReadStreamState {
     let fileHandle: FileHandle
     let options: ReadStreamOptions?
-    var isActive: Bool = false
-    var isPaused: Bool = false
-    var position: Int64 = 0
-    var task: Task<Void, Never>? = nil
+
+    private let lock = NSLock()
+    private var _isActive: Bool = false
+    private var _isPaused: Bool = false
+    private var _position: Int64 = 0
+    private var _task: Task<Void, Never>? = nil
+    private var _pauseStreamContinuation: AsyncStream<Void>.Continuation?
+    private var _pauseStream: AsyncStream<Void>?
+
+    private func sync<T>(_ body: () -> T) -> T {
+      lock.lock()
+      defer { lock.unlock() }
+      return body()
+    }
+
+    var isActive: Bool {
+      get { sync { _isActive } }
+      set { sync { _isActive = newValue } }
+    }
+    var isPaused: Bool {
+      get { sync { _isPaused } }
+      set { sync { _isPaused = newValue } }
+    }
+    var position: Int64 {
+      get { sync { _position } }
+      set { sync { _position = newValue } }
+    }
+    var task: Task<Void, Never>? {
+      get { sync { _task } }
+      set { sync { _task = newValue } }
+    }
     // AsyncStream for pausing/resuming
-    var pauseStreamContinuation: AsyncStream<Void>.Continuation?
-    var pauseStream: AsyncStream<Void>?
+    var pauseStreamContinuation: AsyncStream<Void>.Continuation? {
+      get { sync { _pauseStreamContinuation } }
+      set { sync { _pauseStreamContinuation = newValue } }
+    }
+    var pauseStream: AsyncStream<Void>? {
+      get { sync { _pauseStream } }
+      set { sync { _pauseStream = newValue } }
+    }
+
     init(fileHandle: FileHandle, options: ReadStreamOptions?) {
       self.fileHandle = fileHandle
       self.options = options
@@ -23,14 +68,51 @@ class Fs2Stream: HybridFs2StreamSpec {
   private class WriteStreamState {
     let fileHandle: FileHandle
     let options: WriteStreamOptions?
-    var isActive: Bool = false
-    var position: Int64 = 0
-    var task: Task<Void, Never>? = nil
     let queue = DispatchQueue(label: "com.margelo.nitro.fs2.writequeue")
+
+    private let lock = NSLock()
+    private var _isActive: Bool = false
+    private var _position: Int64 = 0
+    private var _task: Task<Void, Never>? = nil
+    private var _writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation?
+    private var _writeBufferStream: AsyncStream<(Data, Bool)>?
+    private var _shouldFlush: Bool = false
+
+    private func sync<T>(_ body: () -> T) -> T {
+      lock.lock()
+      defer { lock.unlock() }
+      return body()
+    }
+
+    var isActive: Bool {
+      get { sync { _isActive } }
+      set { sync { _isActive = newValue } }
+    }
+    /// Advanced only by the single background writer task, so the read-modify-write at its
+    /// call site is safe; the lock is here for the readers (`getWriteStreamPosition` and the
+    /// progress events).
+    var position: Int64 {
+      get { sync { _position } }
+      set { sync { _position = newValue } }
+    }
+    var task: Task<Void, Never>? {
+      get { sync { _task } }
+      set { sync { _task = newValue } }
+    }
     // AsyncStream for Swift 6 compatibility
-    var writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation?
-    var writeBufferStream: AsyncStream<(Data, Bool)>?
-    var shouldFlush: Bool = false
+    var writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation? {
+      get { sync { _writeBufferContinuation } }
+      set { sync { _writeBufferContinuation = newValue } }
+    }
+    var writeBufferStream: AsyncStream<(Data, Bool)>? {
+      get { sync { _writeBufferStream } }
+      set { sync { _writeBufferStream = newValue } }
+    }
+    var shouldFlush: Bool {
+      get { sync { _shouldFlush } }
+      set { sync { _shouldFlush = newValue } }
+    }
+
     init(fileHandle: FileHandle, options: WriteStreamOptions?) {
       self.fileHandle = fileHandle
       self.options = options
