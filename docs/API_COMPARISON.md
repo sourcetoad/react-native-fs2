@@ -13,6 +13,12 @@ implementation disagree, both are stated — `NativeModules.RNFSManager` is type
 master, so master's types were never checked against master's own code and several are
 simply wrong.
 
+The 4.x behaviour described here is additionally **verified on device**, not just read:
+`example/src/verify.ts` exercises it against the real native layer on launch and writes a JSON
+report (iOS 26.4.1 simulator, Android API 35 emulator). Several rows below exist because that
+harness contradicted what the code appeared to do — the unit suite mocks native, so it cannot
+see any of it.
+
 **Legend**
 
 | Mark | Meaning |
@@ -73,6 +79,21 @@ is caught by the compiler rather than silently misreading it. A missing `ctime` 
 `undefined` rather than becoming `0` — Android's `readDir` does not populate it
 (`Fs2.kt:138`).
 
+### `stat()` on a `content://` URI (Android)
+
+Content URIs go through `statContentUri` (`RNFSManager.kt:290-333`) rather than `File`, because
+there may be no filesystem path behind them at all on API 29+.
+
+`size` comes from `OpenableColumns.SIZE`, falling back to the asset file descriptor. Timestamps
+come from whichever column the provider actually exposes: `DocumentsContract`'s
+`last_modified` (milliseconds) or MediaStore's `date_modified` (**seconds**), with
+`date_added` supplying a genuine `ctime` rather than echoing `mtime` the way the plain-`File`
+path does.
+
+Reading only the `DocumentsContract` column made every `content://media/...` stat report
+`mtime: 0` — 1 January 1970 — because MediaStore does not have that column. Fixed on this
+branch (`RNFSManager.kt:305-323`). `mode` is always `0`; Android has no POSIX mode here.
+
 ## 2. File read and write
 
 | Function | master (3.x) | nitro (4.x) | What changed |
@@ -82,7 +103,7 @@ is caught by the compiler rather than silently misreading it. A missing `ctime` 
 | `writeFile` | `writeFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | `writeFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | ⚠️ Signature identical, but master forwarded the **whole parsed options object** to native (`master:src/index.ts:268`) and iOS really did read a protection key out of it (`master:ios/RNFSManager.m:117-119`), so `NSFileProtectionKey` rode along with the encoding. 4.x passes only `(path, data)`. Because `EncodingOrOptions` also narrowed (section 7), an inline `{ encoding: 'utf8', NSFileProtectionKey: … }` is now a compile error (`TS2353`) rather than a silent drop — but a pre-typed options variable still slips through and loses the key. |
 | `appendFile` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | ✅ Master did not forward options here either, so nothing is lost. Both create the file if it is missing (`master:ios/RNFSManager.m:139-148`; `ios/Fs2.swift:466-479`). |
 | `write` | `write(filepath, contents, position?, encodingOrOptions?): Promise<null>` | `write(filepath, contents, position?, encodingOrOptions?): Promise<void>` | 🔁 Declared return type only. Master declared `Promise<null>` but resolved `undefined`; 4.x declares what it does. `position` still defaults to append: master coerced `undefined` to `-1` in JS, 4.x passes `undefined` and both natives treat a missing/negative position as "seek to end" (`ios/Fs2.swift:590-593`; `Fs2.kt:278` → `RNFSManager.kt:133`). |
-| `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | ⚠️ Same signature, changed result shape — see `StatResult` in section 7 and the timestamps subsection above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). |
+| `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | ⚠️ Same signature, changed result shape — see `StatResult` in section 7 and the timestamps subsection above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). On **Android**, `stat()` on a `content://` URI takes a separate path (`RNFSManager.kt:290-333`) — see the note below. |
 | `hash` | `hash(filepath: string, algorithm: string): Promise<string>` | `hash(filepath: string, algorithm: HashAlgorithm): Promise<string>` | ⚠️ `algorithm` narrowed from `string` to the `HashAlgorithm` union, so an unsupported name is now a compile error instead of a runtime rejection. All six 3.x algorithms are supported: `sha224` was briefly dropped from the union and both generated enums, and has been restored on this branch (`src/nitro/Fs2.nitro.ts:76-82`, `ios/Fs2.swift:324-326`; Kotlin needed no change - `RNFSManager.kt:184` already mapped it). `HashAlgorithm` is exported from the package root, so you can name the parameter type. |
 | `touch` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | 🔁 Public signature unchanged — still takes `Date`. Master gated `ctime` behind a JS-side `Platform.OS === 'ios'` check (`master:src/index.ts:357-358`); 4.x passes both through and lets native decide, and Android still applies only `mtime` (`Fs2.kt:312-315`). Android briefly multiplied the incoming millisecond value by 1000, putting touched files ~30,000 years in the future; fixed on this branch (`RNFSManager.kt:453-455`). |
 
@@ -168,7 +189,7 @@ The whole namespace moved.
 | `queryMediaStore` | `queryMediaStore(searchOptions): Promise<MediaStoreQueryResult>` | `queryMediaStore(searchOptions): Promise<MediaStoreFile \| undefined>` | ⚠️ Two changes. The result type is richer and renamed (section 7), and **"not found" now resolves `undefined` instead of rejecting** (`MediaStore.kt:88-98`, deliberate per `TASKS.md:175`) — a `try/catch` written against 3.x will not fire. Under `strict` the compiler catches the follow-on: `result.uri` is `TS18048: 'result' is possibly 'undefined'`. Without `strict`, it is a runtime `TypeError`. Search options also became mostly optional except `mediaType`. |
 | `deleteFromMediaStore` | `deleteFromMediaStore(uri: string): Promise<boolean>` | `deleteFromMediaStore(uri: string): Promise<boolean>` | ✅ |
 | `MEDIA_AUDIO` / `MEDIA_IMAGE` / `MEDIA_VIDEO` / `MEDIA_DOWNLOAD` | `'Audio'` / `'Image'` / `'Video'` / `'Download'` | same values | 🔁 Values identical; only the type name changed (`MediaCollections` → `MediaCollectionType`) and access is via the named export. |
-| iOS behaviour | Not implemented | All six methods reject with `ENOTSUP: MediaStore is not supported on iOS` (`ios/MediaStore.swift:5-27`) | 🔁 Deliberate no-op stubs (`TASKS.md:176`), now carrying the `CODE:` prefix the error contract requires. |
+| iOS behaviour | Not implemented | All six methods reject with `ENOTSUP: MediaStore is not supported on iOS` (`ios/MediaStore.swift:11-45`) | 🔁 Deliberate no-op stubs (`TASKS.md:176`) carrying the `CODE:` prefix the error contract requires. They **reject** rather than throwing synchronously: a synchronous throw out of a `throws -> Promise<T>` reaches JS as `MediaStore.mediaStoreQueryFile(...): ENOTSUP: …`, because Nitro prepends the method name — which breaks `message.startsWith('ENOTSUP')`. Fixed on this branch. |
 
 ## 6. Path constants
 
@@ -293,8 +314,8 @@ return.
 | Peer dependencies | `react`, `react-native` | `react`, `react-native >=0.82.0`, `react-native-nitro-modules ^0.37.0` | ⚠️ New required peer dependency, and a higher RN floor. |
 | Runtime dependencies | `base-64`, `utf8` | `buffer` | 🔁 Encoding is done with `Buffer` now instead of the two shims. |
 | Optional dependency | `react-native-blob-jsi-helper` needed for `readFile(path, 'arraybuffer')` | none | 🔁 Removed — the buffer comes straight from native. |
-| Error messages | `CODE: message` from native | `CODE: message`, preserved through Nitro on both platforms | 🔁 Nitro mangles thrown errors differently per platform. 4.x adds `JsVisibleError` on Android (`android/.../utils/JsVisibleError.kt`) and `CustomStringConvertible` on the iOS stream errors (`ios/StreamError.swift:3`) so `err.message.startsWith('ENOENT')` still works. Same contract, different machinery. |
-| Unsupported operations | Mixed / unprefixed | `ENOTSUP: …` | 🔁 iOS MediaStore stubs and the Android API-level guards carry the code prefix. Applied uniformly: the iOS MediaStore stubs, the iOS `scanFile`/`getAllExternalFilesDirs` stubs, the Android `resumeDownload`/`isResumable` stubs, and the Android API-level guards all carry the prefix. |
+| Error messages | `CODE: message` from native | `CODE: message`, preserved through Nitro on both platforms | 🔁 The contract is `err.message.startsWith('CODE')`, and it holds on both platforms. Nitro mangles thrown errors differently per platform, so 4.x adds `JsVisibleError` on Android (`android/.../utils/JsVisibleError.kt`) and `CustomStringConvertible` on the iOS stream errors (`ios/StreamError.swift:3`). Two things to know: errors must reject rather than throw synchronously out of a `throws -> Promise<T>`, or Nitro prefixes the method name; and Android messages carry a **trailing newline** iOS does not — `printStackTrace` calls `println`, which `JsVisibleError` documents as unavoidable. `startsWith` is unaffected, exact `===` comparison is not. |
+| Unsupported operations | Mixed / unprefixed | `ENOTSUP: …` | 🔁 Applied uniformly: the iOS MediaStore stubs, the iOS `scanFile`/`getAllExternalFilesDirs` stubs, the Android `resumeDownload`/`isResumable` stubs, and the Android API-level guards all carry the prefix. |
 | `RNFSFileTypeRegular` / `RNFSFileTypeDirectory` | Native constants, read off the module | — | 🔁 Gone. Never documented as public API, but reachable via `NativeModules.RNFSManager` and used by master's own `stat`/`readDir` mapping. Use `stat().isFile()` / the `StatResultType` union instead. |
 | `RNFSFileProtection*` constants | Four native constants on iOS (`master:ios/RNFSManager.m:692-695`) | — | 🔁 Gone. Also undocumented but reachable via `NativeModules.RNFSManager`. Their four values are exactly the `FileProtectionType` union, which is exported (section 7). |
 
@@ -344,6 +365,25 @@ Calling an Android-only method on iOS, or an iOS-only one on Android, rejects wi
 `ENOTSUP:` prefixed message rather than resolving something plausible — `scanFile` and
 `getAllExternalFilesDirs` on iOS, `resumeDownload` and `isResumable` on Android, and every
 `MediaStore` method on iOS.
+
+### Verifying against a device
+
+`example/src/verify.ts` runs on app launch, exercises the behaviour described here against the
+real native layer, renders a pass/fail list in the example app and writes a JSON report. Read
+it back with:
+
+```bash
+# iOS
+cat "$(xcrun simctl get_app_container <udid> fs2.example data)/Documents/rnfs2-verify.json"
+# Android
+adb exec-out run-as fs2.example cat files/rnfs2-verify.json
+```
+
+Assert on this library's behaviour, not the peer's. Two checks written here originally asserted
+`statusCode === 200` and that the `begin` callback fired; both failed for reasons outside the
+library — a rate-limiting host, then a chunked response with no `Content-Length`, which
+legitimately suppresses `begin` (`ios/Downloader.swift:148`). The download check now targets the
+Metro dev server, which is running whenever the example app is.
 
 ### Known gaps in 4.0
 
