@@ -42,80 +42,81 @@ See [FILE_STREAM.md](./docs/FILE_STREAM.md) for complete documentation.
 
 ## 📋 Changes & Compatibility
 
-### ✅ Mostly Backward Compatible!
-The core API remains backward compatible - most existing code will work without changes!
+This is a major release with **real breaking changes**. Most call sites are unchanged, but
+several are not, and two of them fail silently rather than throwing. Read this section before
+upgrading.
 
 ### Required Dependencies
-You'll need to add Nitro Modules as a peer dependency:
+
+Nitro Modules becomes a peer dependency:
+
 ```json
 {
   "react-native-nitro-modules": "^0.37.0"
 }
 ```
 
-### API Improvements (Non-Breaking)
+Also requires React Native `>=0.82.0`.
 
-#### Backward Compatible File Operations
-The core file API remains **backward compatible**! You can still use the same API:
+### Breaking Changes
+
+| Change | What breaks | How it fails |
+|---|---|---|
+| Timestamps are `number` (ms since epoch), not `Date`, on `readDir()` and `stat()` | `items[0].mtime.getFullYear()` | Throws |
+| `MediaStore` moved from the default export to a named export | `RNFS.MediaStore.…` | Throws — `RNFS.MediaStore` is `undefined` |
+| `queryMediaStore` returns `MediaStoreFile \| undefined`; a query matching nothing resolves `undefined` instead of rejecting | `try/catch` around a not-found query | Silent — the `catch` never runs |
+| `MediaStoreQueryResult` → `MediaStoreFile`, `FileDescriptor` → `FileDescription`, `contentUri` → `uri` | Type imports and `result.contentUri` | Type error / `undefined` |
+| `MkdirOptions` keys renamed: `NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` → `fileProtection` | `mkdir(path, { NSFileProtectionKey: … })` | **Silent** — old keys are ignored |
+| `moveFile`/`copyFile` lost their `options: FileOptions` parameter | `copyFile(a, b, { NSFileProtectionKey: … })` | Type error |
+| `downloadFile`: master's `resumable` **callback** is now `canBeResumed` | `resumable: () => {}` | **Silent** — the callback never fires |
+| `completeHandlerIOS` removed | `RNFS.completeHandlerIOS(jobId)` | Throws |
+| Hash algorithms and file protection values are union types now | Passing an arbitrary string | Type error |
+
+The two marked **silent** are the ones worth grepping for before you upgrade.
+
+#### `completeHandlerIOS` and background downloads
+
+There is no replacement in 4.0. `background: true` still creates a background
+`URLSession` on iOS, but the library has no way to invoke the system completion handler when
+a download finishes while the app is suspended. If you depend on that, treat background
+downloads as unsupported in 4.0.
+
+### Not Breaking (despite what you may expect)
+
+- **`isFile()` / `isDirectory()` are still methods** on both `readDir()` items and `stat()`
+  results, matching 3.x. An earlier cut of this branch returned plain booleans from
+  `readDir`, which broke `items[0].isFile()`; that has been reverted to the 3.x shape.
+- **`MainBundlePath` is still exported.** It was missing from an earlier cut of this branch.
+- **`downloadFile` request headers work.** `headers` was not reaching native in an earlier
+  cut; it does now.
+
+### File Operations
+
+The core file API is unchanged:
 
 ```typescript
-// This still works exactly the same!
 const content = await RNFS.readFile(path, 'utf8');
 await RNFS.writeFile(path, content, 'utf8');
 ```
 
-**Under the hood**: The native bridge now uses `ArrayBuffer` for better performance and smaller memory footprint, but encoding/decoding is handled transparently in JavaScript. No code changes required!
+**Under the hood**: the native bridge now uses `ArrayBuffer`; encoding and decoding happen in
+JavaScript. No code changes required.
 
-#### Download API - Fully Backward Compatible
-The download API remains **100% backward compatible**:
+### Download API
 
 ```typescript
-// Works exactly the same as v3.x!
 const { jobId, promise } = RNFS.downloadFile({
   fromUrl: url,
   toFile: path,
+  headers: { Authorization: 'Bearer ...' },
   begin: (res) => { },
   progress: (res) => { }
 });
 ```
 
-**Internal improvement**: Under the hood, the download system now uses Nitro's event listeners for better performance, but the public API is unchanged.
-
-### Breaking Type Changes
-
-These changes may require code updates:
-
-- **Timestamps as numbers**: `ReadDirItem` and `stat()` now return timestamps as numbers (milliseconds since epoch) instead of Date objects
-  ```typescript
-  // Before: res.mtime was a Date
-  // After: res.mtime is a number (use new Date(res.mtime) if needed)
-  const items = await RNFS.readDir(path);
-  const date = new Date(items[0].mtime); // Convert if you need Date object
-  ```
-
-- **MediaStore `queryMediaStore` result structure changed** (Breaking - requires code changes):
-  - Type renamed: `MediaStoreQueryResult` → `MediaStoreFile`
-  - Property renamed: `contentUri` → `uri`
-  - Additional fields added: `name`, `mimeType`, `size`, `dateAdded`, `dateModified`, `relativePath`
-
-  ```typescript
-  // Before (v3.x)
-  const result = await RNFS.MediaStore.queryMediaStore({...});
-  console.log(result.contentUri); // ❌ This will be undefined in v4.x
-
-  // After (v4.x)
-  const result = await RNFS.MediaStore.queryMediaStore({...});
-  console.log(result.uri); // ✅ Use .uri instead of .contentUri
-  // Now you also get additional metadata:
-  console.log(result.name, result.size, result.mimeType);
-  ```
-
-  **Migration**: Replace all `result.contentUri` with `result.uri`
-
-- **MediaStore type renames** (Breaking for TypeScript users):
-  - `FileDescriptor` → `FileDescription`
-
-- **Stricter types**: Hash algorithms and file protection types are now union types for better type safety
+Unchanged except for the `resumable` → `canBeResumed` rename above. Note that `jobId` is no
+longer part of the options type — the library allocates it and hands it back to you, as in
+3.x.
 
 ## 🎁 New Features
 
@@ -138,7 +139,15 @@ await writeStream.close();
 ```
 
 ### Enhanced MediaStore Support (Android)
-MediaStore functionality remains available with improved type safety and performance.
+MediaStore functionality remains available with improved type safety and performance. Note it
+is a **named export** now:
+
+```typescript
+import { MediaStore } from 'react-native-fs2';
+
+const result = await MediaStore.queryMediaStore({ ... });
+console.log(result?.uri); // `contentUri` in 3.x; can be undefined when nothing matches
+```
 
 ### Improved Error Handling
 Better error messages with platform-specific error codes and context.
@@ -165,35 +174,55 @@ yarn add react-native-nitro-modules@^0.37.0
 ### 2. Update Imports
 ```typescript
 import RNFS from 'react-native-fs2';
-// All existing APIs remain under RNFS namespace
+// Core file APIs remain under the RNFS default export
+
+// MediaStore is a named export now — RNFS.MediaStore no longer exists
+import { MediaStore } from 'react-native-fs2';
 
 // Streaming APIs (new!) are separate exports
 import { createReadStream, createWriteStream } from 'react-native-fs2';
 ```
 
-### 3. Verify File Operations
-Most file operations are backward compatible - no changes needed! The same API works:
+### 3. Grep for the silent breakages
+These two do not throw — they just stop doing anything:
+```bash
+grep -rn "NSFileProtectionKey\|NSURLIsExcludedFromBackupKey" src/   # renamed MkdirOptions keys
+grep -rn "resumable:" src/                                          # now canBeResumed
+```
+
+### 4. Verify File Operations
+Core file operations are unchanged:
 ```typescript
-// These still work exactly the same
 await RNFS.readFile(path, 'utf8');
 await RNFS.writeFile(path, content, 'utf8');
 await RNFS.readDir(path);
 ```
 
-### 4. (Optional) Explore New Features
-Check out the new capabilities:
+### 5. (Optional) Explore New Features
 - **File Streaming API** for efficient large file operations (see [FILE_STREAM.md](./docs/FILE_STREAM.md))
 - **Better Performance** across all operations thanks to Nitro Modules
 
-### 5. Test Key Areas
-Since most APIs are backward compatible, focus testing on:
-- Any code that uses `mtime`/`ctime` from `stat()` or `readDir()` (now numbers instead of Date)
-- Download functionality (should work the same)
-- MediaStore operations on Android (should work the same)
+### 6. Test Key Areas
+- `mtime`/`ctime` from `stat()` or `readDir()` — now numbers, not Dates
+- Every `RNFS.MediaStore.*` call site — these now throw
+- `mkdir` calls that passed `NSFileProtectionKey` or `NSURLIsExcludedFromBackupKey`
+- `downloadFile` calls that passed a `resumable` callback
+- `queryMediaStore` calls that relied on a rejection when nothing matched
+- Background downloads on iOS, if you used `completeHandlerIOS`
 
-## 🐛 Known Issues
+## 🐛 Known Issues / Limitations
 
-- Streaming API is in **beta** - please report issues
+- The streaming API is **beta** — the exported functions carry `@beta` JSDoc and may change
+  without a major bump.
+- Stream event listeners are **single-subscriber**: the native maps hold one callback per
+  (stream, event), so a second `listenTo*` for the same stream replaces the first. Do not
+  subscribe to a stream that `copyFileWithProgress` or `processFileInChunks` is driving.
+- `background: true` downloads on iOS cannot signal completion — see `completeHandlerIOS`
+  above.
+- `moveFile`/`copyFile` have no `options` parameter; the iOS `NSFileProtectionKey` option is
+  unavailable on them.
+- iOS MediaStore methods are deliberate no-ops that reject with `ENOTSUP:` — MediaStore is
+  Android-only.
 
 ## 🙏 Acknowledgments
 
@@ -222,5 +251,8 @@ This major release builds upon the foundation of `react-native-fs` and leverages
 
 ---
 
-**Note**: This is a major version bump due to the architectural change and new peer dependency requirement. The API is mostly backward compatible with only minor type changes for timestamps. Most apps can upgrade with minimal changes!
+**Note**: This is a major version bump for an architectural change, a new peer dependency, and
+the breaking changes listed above. Most apps will need small changes; the two silent ones
+(renamed `MkdirOptions` keys, `resumable` → `canBeResumed`) are worth grepping for even if
+everything appears to work after upgrading.
 
