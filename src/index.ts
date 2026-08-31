@@ -65,6 +65,13 @@ const RNFS2Nitro = NitroModules.createHybridObject<Fs2>('Fs2');
 let globalJobId = 0;
 const getJobId = () => ++globalJobId;
 
+/**
+ * How long `downloadFile`'s promise waits for the `complete` event after native has settled.
+ * Only reached when the event has not already arrived, which in practice means iOS ordering or
+ * a download that will never report completion.
+ */
+const COMPLETION_GRACE_MS = 250;
+
 const downloadListeners = {
   begin: new Map<number, (event: DownloadEventResult) => void>(),
   progress: new Map<number, (event: DownloadEventResult) => void>(),
@@ -256,6 +263,10 @@ const compat = {
     // `{ jobId, statusCode, bytesWritten }`, so capture the event here and rebuild that shape
     // rather than handing callers a bare number they would have to notice.
     let completion: DownloadEventResult | undefined;
+    let completionArrived!: () => void;
+    const completionSettled = new Promise<void>((resolve) => {
+      completionArrived = resolve;
+    });
 
     if (options.begin) {
       downloadListeners.begin.set(jobId, options.begin);
@@ -279,6 +290,7 @@ const compat = {
     // when the caller passed no `complete` callback.
     downloadListeners.complete.set(jobId, (event) => {
       completion = event;
+      completionArrived();
       options.complete?.(event);
     });
     subscriptions.push(
@@ -338,13 +350,22 @@ const compat = {
       // `headers` is a separate argument on the Nitro method, not a field of the options
       // struct. Both platforms read it; passing only one argument silently dropped it.
       promise: RNFS2Nitro.downloadFile(nitroOptions, options.headers)
-        .then((resolvedJobId: number) => {
+        .then(async (resolvedJobId: number) => {
+          // Native fires `complete` before it settles the promise, but the two cross into JS
+          // independently and on iOS the event can arrive a beat later. Waiting for it beats
+          // reporting an undefined statusCode; the race caps the wait for the cases where no
+          // complete event is coming at all, such as a download ended by stopDownload().
+          if (!completion) {
+            await Promise.race([
+              completionSettled,
+              new Promise<void>((resolve) =>
+                setTimeout(resolve, COMPLETION_GRACE_MS)
+              ),
+            ]);
+          }
+
           release();
 
-          // `complete` fires before the native promise settles on both platforms - iOS resumes
-          // its continuation in downloadCleanup (ios/Fs2.swift:871-878), Android in onCleanup
-          // (Fs2.kt:380) - so `completion` is populated by the time we get here. A download
-          // stopped via stopDownload() settles without a complete event, hence the fallback.
           return {
             jobId: completion?.jobId ?? resolvedJobId,
             statusCode: completion?.statusCode,
