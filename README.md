@@ -611,6 +611,28 @@ await MediaStore.queryMediaStore({ ... });
 Both now take `(filepath, destPath)` only. The iOS `NSFileProtectionKey` option is not
 available on them in 4.x.
 
+#### `moveFile` and `copyFile` overwrite an existing destination on iOS
+
+In 3.x these failed on iOS if something already existed at `destPath`, while Android
+overwrote it. Both platforms now overwrite: the destination is removed first.
+
+```typescript
+// v3.x on iOS: rejects if dest exists. On Android: overwrites.
+// v4.x on both: overwrites, destroying whatever was at dest.
+await RNFS.copyFile(src, dest);
+```
+
+This is silent — nothing warns you, and the previous contents are gone. If you relied on the
+iOS rejection to avoid clobbering a file, check with `exists()` first:
+
+```typescript
+if (await RNFS.exists(dest)) throw new Error('refusing to overwrite');
+await RNFS.copyFile(src, dest);
+```
+
+A directory destination is also handled now: passing one appends the source filename rather
+than failing, and missing parent directories are created.
+
 #### `downloadFile`: the `resumable` callback is now `canBeResumed`
 
 ```typescript
@@ -635,7 +657,7 @@ Still available, unchanged.
 
 ### What Still Works
 
-✅ **All core file operations** — no changes required:
+✅ **Core file operations** — same call shape:
 ```typescript
 await RNFS.readFile(path, 'utf8');
 await RNFS.writeFile(path, content, 'utf8');
@@ -643,6 +665,9 @@ await RNFS.copyFile(src, dest);
 await RNFS.moveFile(src, dest);
 await RNFS.unlink(path);
 ```
+
+Note the behaviour changes above for `copyFile`/`moveFile` (they overwrite now) — the
+signatures are unchanged but the outcome is not.
 
 ✅ **`isFile()` / `isDirectory()`** on both `readDir()` items and `stat()` results — still
 methods, as in 3.x.
