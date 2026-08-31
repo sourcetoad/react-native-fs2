@@ -9,7 +9,13 @@
  * Every check names the commit it guards, so a failure points straight at what regressed.
  */
 import { Platform } from 'react-native';
-import RNFS, { MediaStore } from 'react-native-fs2';
+import RNFS, {
+  MediaStore,
+  copyFileWithProgress,
+  processFileInChunks,
+  readStream,
+  writeStream,
+} from 'react-native-fs2';
 
 export type Check = {
   name: string;
@@ -587,6 +593,177 @@ export async function runVerification(): Promise<Report> {
       return 'moved with protection, source gone';
     }
   );
+
+  // The streaming API. Until now it had never run against real native on either platform -
+  // `example5.tsx` drives it by hand and the unit suite substitutes a fake native layer, so
+  // ordering, back-pressure and chunk-boundary decoding were all unverified end to end.
+  //
+  // Every check below uses a file several times the buffer size, because a single-chunk file
+  // exercises none of the interesting behaviour.
+  const STREAM_CHUNK = 8 * 1024;
+
+  // `readFile` is typed `string | ArrayBuffer`; every streaming check wants the text form.
+  const readText = async (path: string): Promise<string> => {
+    const contents = await RNFS.readFile(path, 'utf8');
+    assert(typeof contents === 'string', `readFile gave ${typeof contents}`);
+    return contents as string;
+  };
+
+  // Deliberately not a repeating byte: a stream that duplicated, dropped or reordered a chunk
+  // would still round-trip a uniform payload. Each line carries its own index.
+  const makeStreamPayload = (lines: number) =>
+    Array.from({ length: lines }, (_, i) => `line ${i} ${'x'.repeat(64)}`).join(
+      '\n'
+    );
+
+  await check(
+    'readStream() round-trips a multi-chunk file',
+    'streaming',
+    async () => {
+      const file = `${root}/stream-read.txt`;
+      const payload = makeStreamPayload(600);
+      await RNFS.writeFile(file, payload, 'utf8');
+      const size = (await RNFS.stat(file)).size;
+
+      const back = await readStream(file, 'utf8', {
+        bufferSize: STREAM_CHUNK,
+      });
+
+      assert(typeof back === 'string', `got ${typeof back}, expected string`);
+      assert(
+        back === payload,
+        `round-trip differs: ${(back as string).length} chars back vs ${payload.length} sent`
+      );
+      return `${size} bytes over ~${Math.ceil(size / STREAM_CHUNK)} chunks`;
+    }
+  );
+
+  // The wrapper assembles every chunk before decoding once, precisely so a multi-byte
+  // character split across a chunk boundary survives. Decoding per chunk corrupts it.
+  await check(
+    'readStream() decodes utf8 across a chunk boundary',
+    'streaming',
+    async () => {
+      const file = `${root}/stream-utf8.txt`;
+      // 'é' is two bytes, so an odd-length ASCII run before it lands the pair astride the
+      // boundary for one of these sizes.
+      const payload = `${'a'.repeat(STREAM_CHUNK - 1)}é${'b'.repeat(STREAM_CHUNK)}`;
+      await RNFS.writeFile(file, payload, 'utf8');
+
+      const back = await readStream(file, 'utf8', {
+        bufferSize: STREAM_CHUNK,
+      });
+
+      assert(back === payload, 'multi-byte character did not survive');
+      assert(
+        !(back as string).includes('�'),
+        'contains U+FFFD - a chunk was decoded in isolation'
+      );
+      return 'two-byte character intact across the boundary';
+    }
+  );
+
+  await check(
+    'writeStream() round-trips through readFile()',
+    'streaming',
+    async () => {
+      const file = `${root}/stream-write.txt`;
+      const payload = makeStreamPayload(400);
+
+      await writeStream(file, payload, 'utf8');
+
+      const back = await readText(file);
+      assert(
+        back === payload,
+        `read back ${back.length} chars, wrote ${payload.length}`
+      );
+      return `${(await RNFS.stat(file)).size} bytes`;
+    }
+  );
+
+  // The one that matters most: native does not await the data callback, so without the
+  // serialised write chain the destination can be assembled out of order.
+  await check(
+    'copyFileWithProgress() copies byte-for-byte',
+    'streaming',
+    async () => {
+      const from = `${root}/stream-copy-src.txt`;
+      const to = `${root}/stream-copy-dst.txt`;
+      const payload = makeStreamPayload(2000);
+      await RNFS.writeFile(from, payload, 'utf8');
+
+      const progressValues: number[] = [];
+      await copyFileWithProgress(from, to, {
+        bufferSize: STREAM_CHUNK,
+        onProgress: (p) => progressValues.push(p),
+      });
+
+      const back = await readText(to);
+      assert(
+        back === payload,
+        `copy differs: ${back.length} chars vs ${payload.length}. ` +
+          `First divergence at index ${[...payload].findIndex((c, i) => back[i] !== c)}`
+      );
+      assert(progressValues.length > 0, 'no progress events fired');
+      assert(
+        progressValues[progressValues.length - 1]! > 0.99,
+        `final progress was ${progressValues[progressValues.length - 1]}`
+      );
+      return `${payload.length} chars, ${progressValues.length} progress events`;
+    }
+  );
+
+  await check(
+    'processFileInChunks() delivers every chunk in order',
+    'streaming',
+    async () => {
+      const file = `${root}/stream-chunks.txt`;
+      const payload = makeStreamPayload(1200);
+      await RNFS.writeFile(file, payload, 'utf8');
+      const size = (await RNFS.stat(file)).size;
+
+      const indices: number[] = [];
+      const positions: number[] = [];
+      let bytes = 0;
+
+      await processFileInChunks(
+        file,
+        async (chunk, index, position) => {
+          indices.push(index);
+          positions.push(position);
+          bytes += chunk.byteLength;
+        },
+        { bufferSize: STREAM_CHUNK }
+      );
+
+      assert(
+        indices.length > 1,
+        `only ${indices.length} chunk(s); expected several`
+      );
+      assert(
+        indices.every((v, i) => v === i),
+        `chunk indices out of order: ${indices.slice(0, 10).join(',')}`
+      );
+      assert(
+        positions.every(
+          (v, i) => v === (i === 0 ? 0 : positions[i - 1]! + STREAM_CHUNK)
+        ),
+        'positions are not contiguous'
+      );
+      assert(bytes === size, `saw ${bytes} bytes, file is ${size}`);
+      return `${indices.length} chunks, ${bytes} bytes, all in order`;
+    }
+  );
+
+  await check('readStream() handles an empty file', 'streaming', async () => {
+    const file = `${root}/stream-empty.txt`;
+    await RNFS.writeFile(file, '', 'utf8');
+
+    const back = await readStream(file, 'utf8', { bufferSize: STREAM_CHUNK });
+
+    assert(back === '', `expected empty string, got ${JSON.stringify(back)}`);
+    return 'resolved empty rather than hanging';
+  });
 
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
