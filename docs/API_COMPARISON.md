@@ -298,31 +298,20 @@ return.
 
 ### Fails silently — no compile error, no throw, wrong behaviour
 
-These are the 💥 rows. Nothing will tell you; you have to go looking.
+Three of these remain. Nothing will tell you; you have to go looking.
 
 ```bash
-# Download promise resolves the jobId now, not { statusCode, bytesWritten }.
-grep -rn "downloadFile" --include=*.ts --include=*.tsx --include=*.js src/
-
-# cacheable/discretionary were inert on 3.x and are live now.
+# cacheable/discretionary were declared but inert on 3.x, and are live now.
+# An explicit `cacheable: false` did nothing before and takes effect in 4.0.
 grep -rn "cacheable\|discretionary" src/
 
-# iOS: PicturesDirectoryPath is now a truthy path to a nonexistent directory.
-grep -rn "PicturesDirectoryPath" src/
-
 # iOS: copyFile/moveFile overwrite an existing destination instead of failing.
+# Android always overwrote, so only iOS call sites change behaviour.
 grep -rn "copyFile\|moveFile" src/
 
-# Android: getFSInfo no longer returns totalSpaceEx/freeSpaceEx.
-grep -rn "SpaceEx" src/
-
-# Android: isResumable resolves false, resumeDownload no-ops (both threw on 3.x).
-# iOS: scanFile / getAllExternalFilesDirs resolve [] (both threw on 3.x).
-grep -rn "isResumable\|resumeDownload\|scanFile\|getAllExternalFilesDirs" src/
-
-# iOS: unlink on a missing path no longer rejects.
-# Android: unlink/exists now resolve content:// URIs to the underlying file.
-grep -rn "unlink\|exists" src/
+# Android: exists() and unlink() now resolve content:// URIs to the underlying file,
+# where 3.x operated on the raw string and always reported false / failed.
+grep -rn "exists\|unlink" src/
 ```
 
 ### Caught by the compiler
@@ -335,6 +324,7 @@ grep -rn "NSFileProtectionKey\|NSURLIsExcludedFromBackupKey" src/   # renamed; a
 grep -rn "resumable:"                                              # download callback, now canBeResumed
 grep -rn "queryMediaStore"                                         # resolves undefined; needs a null check under strict
 grep -rn "moveFile(.*,.*,\|copyFile(.*,.*,"                        # third options argument removed
+grep -rn "\.mtime\|\.ctime"                                        # numbers now, not Dates - `.getTime()` no longer compiles
 ```
 
 ### Caught on first run
@@ -344,6 +334,15 @@ grep -rn "RNFS.MediaStore"        # named export now: import { MediaStore } from
 grep -rn "completeHandlerIOS"     # removed, no replacement
 ```
 
-### Open defects in 4.x, not migration differences
+Calling an Android-only method on iOS, or an iOS-only one on Android, rejects with an
+`ENOTSUP:` prefixed message rather than resolving something plausible — `scanFile` and
+`getAllExternalFilesDirs` on iOS, `resumeDownload` and `isResumable` on Android, and every
+`MediaStore` method on iOS.
 
-- **iOS background downloads are unusable** without `completeHandlerIOS`. See section 4.
+### Known gaps in 4.0
+
+- **iOS background downloads are unusable** without `completeHandlerIOS` — a deferred
+  maintainer decision, not an oversight. See section 4.
+- **iOS file protection** is unavailable on `writeFile`, `moveFile` and `copyFile`; `mkdir`
+  still accepts it. Deferred to 4.1 (`MIGRATION_CHECKLIST.md:18-19`). Pre-create the directory
+  with `fileProtection` — files inherit their directory's class.
