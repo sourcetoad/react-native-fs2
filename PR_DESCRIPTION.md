@@ -66,13 +66,16 @@ Also requires React Native `>=0.82.0`.
 | `MediaStore` moved from the default export to a named export | `RNFS.MediaStore.…` | Throws — `RNFS.MediaStore` is `undefined` |
 | `queryMediaStore` returns `MediaStoreFile \| undefined`; a query matching nothing resolves `undefined` instead of rejecting | `try/catch` around a not-found query | Silent — the `catch` never runs |
 | `MediaStoreQueryResult` → `MediaStoreFile`, `FileDescriptor` → `FileDescription`, `contentUri` → `uri` | Type imports and `result.contentUri` | Type error / `undefined` |
-| `MkdirOptions` keys renamed: `NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` → `fileProtection` | `mkdir(path, { NSFileProtectionKey: … })` | **Silent** — old keys are ignored |
-| `moveFile`/`copyFile` lost their `options: FileOptions` parameter | `copyFile(a, b, { NSFileProtectionKey: … })` | Type error |
+| `MkdirOptions` keys renamed: `NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` → `fileProtection` | `mkdir(path, { NSFileProtectionKey: … })` | Type error on a literal (`TS2561`); **silent** via a pre-typed variable |
+| `FileOptions.NSFileProtectionKey` renamed to `fileProtection`, and now accepted by `writeFile` too | `copyFile(a, b, { NSFileProtectionKey: … })` | Type error on a literal; **silent** via a pre-typed variable |
 | `downloadFile`: master's `resumable` **callback** is now `canBeResumed` | `resumable: () => {}` | **Silent** — the callback never fires |
 | `completeHandlerIOS` removed | `RNFS.completeHandlerIOS(jobId)` | Throws |
 | Hash algorithms and file protection values are union types now | Passing an arbitrary string | Type error |
 
-The two marked **silent** are the ones worth grepping for before you upgrade.
+The ones marked **silent** are worth grepping for before you upgrade. Note that the renamed
+option keys only fail loudly when passed as an object literal — TypeScript rejects the unknown
+key and suggests the new name. An options object that reaches the call as a separately-typed
+variable is accepted and the key dropped, so check those by hand.
 
 #### `completeHandlerIOS` and background downloads
 
