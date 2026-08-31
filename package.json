@@ -168,5 +168,13 @@
   },
   "overrides": {
     "react-native-monorepo-config": "0.2.2"
+  },
+  "codegenConfig": {
+    "name": "RNFS2Spec",
+    "type": "modules",
+    "jsSrcsDir": "src/nitro",
+    "android": {
+      "javaPackageName": "com.margelo.nitro.fs2"
+    }
   }
 }
