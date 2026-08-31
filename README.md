@@ -72,28 +72,26 @@ await RNFS.mkdir(`FolderToCreate`);
 
  * Creates directory at `filepath` location.
  * Optionally include `MkdirOptions` with properties:
-   * (iOS) - [NSURLIsExcludedFromBackupKey](https://developer.apple.com/documentation/foundation/nsurlisexcludedfrombackupkey)
-   * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
+   * `excludedFromBackup: boolean` (iOS) - maps to [NSURLIsExcludedFromBackupKey](https://developer.apple.com/documentation/foundation/nsurlisexcludedfrombackupkey). Renamed in 4.x; the old `NSURLIsExcludedFromBackupKey` key is ignored.
+   * `fileProtection: FileProtectionType` (iOS) - maps to [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey). Renamed in 4.x; the old `NSFileProtectionKey` key is ignored.
 
 ### `moveFile`
 ```ts
-// moveFile(filepath: string, destPath: string, options?: FileOptions): Promise<undefined>
+// moveFile(filepath: string, destPath: string): Promise<void>
 await RNFS.moveFile('FileToMove', 'DestinationLocation')
 ```
 
 * Moves file from `filepath` to `destPath`
-* Optionally includes `FileOptions` with properties:
-  * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
+* The `options: FileOptions` parameter (iOS `NSFileProtectionKey`) was dropped in 4.x.
 
 ### `copyFile`
 ```ts
-// copyFile(filepath: string, destPath: string, options?: FileOptions): Promise<undefined>
+// copyFile(filepath: string, destPath: string): Promise<void>
 await RNFS.copyFile('FileToCopy', 'DestinationLocation')
 ```
 
 * Copies file from `filepath` to `destPath`
-* Optionally includes `FileOptions` with properties:
-  * (iOS) - [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey)
+* The `options: FileOptions` parameter (iOS `NSFileProtectionKey`) was dropped in 4.x.
 
 ### `getFSInfo`
 ```ts
@@ -126,14 +124,6 @@ Also recursively deletes directories (works like Linux `rm -rf`).
 await RNFS.exists('File')
 ```
 * Check if the item exists at `filepath`. If the item does not exist, return false.
-
-### `completeHandlerIOS` (iOS Only)
-```ts
-// completeHandlerIOS(jobId: number): void
-await RNFS.completeHandler('JobID')
-```
-*  Tell iOS you are done handling a completed download when using background downloads.
-
 
 ### `readDir`
 ```ts
@@ -299,9 +289,10 @@ await RNFS.touch('FilePath', Date, Date)
 ### `scanFile` (Android Only)
 ```ts
 // scanFile(path: string): Promise<string[]>
-await RNFS.scanFile('FilePath', Date, Date)
+await RNFS.scanFile('FilePath')
 ```
 * Scan the file using [Media Scanner](https://developer.android.com/reference/android/media/MediaScannerConnection).
+* Resolves with the scanned paths. On iOS this is a no-op that resolves `[]`.
 
 # File Streaming API (Beta)
 
@@ -367,6 +358,22 @@ await stream.close();
 
 # MediaStore
 
+> **Breaking change in 4.x:** `MediaStore` is a named export now, not a property of the
+> default export. Reading it off the default export gives `undefined`, and calling a method
+> on it throws.
+>
+> ```ts
+> // v3.x
+> import RNFS from 'react-native-fs2';
+> await RNFS.MediaStore.queryMediaStore({ ... });
+>
+> // v4.x
+> import { MediaStore } from 'react-native-fs2';
+> await MediaStore.queryMediaStore({ ... });
+> ```
+>
+> The examples below use `MediaStore` from the named import.
+
 ### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore. 
 
 ### Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
@@ -399,7 +406,7 @@ await stream.close();
 
 const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.createMediaFile(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await MediaStore.createMediaFile(fileDescription,  MediaStore.MEDIA_IMAGE)
 ```
 
 ### `updateMediaFile`
@@ -412,7 +419,7 @@ const contentURI = await RNFS.MediaStore.createMediaFile(fileDescription,  RNFS.
 const contentURI = 'content://media/external/images/media/123'
 const fileDescription = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescription, RNFS.MediaStore.MEDIA_IMAGE)
+const contentURI = await MediaStore.updateMediaFile(contentURI, fileDescription, MediaStore.MEDIA_IMAGE)
 ```
 
 ### `writeToMediaFile`
@@ -422,7 +429,7 @@ const contentURI = await RNFS.MediaStore.updateMediaFile(contentURI, fileDescrip
 ```ts
 // writeToMediaFile((uri: string, path: string): Promise<void>
 
-await RNFS.MediaStore.writeToMediaFile('content://media/external/images/media/123', '/path/to/image/imageToWrite.png')
+await MediaStore.writeToMediaFile('content://media/external/images/media/123', '/path/to/image/imageToWrite.png')
 ```
 
 ### `copyToMediaStore`
@@ -434,7 +441,7 @@ await RNFS.MediaStore.writeToMediaFile('content://media/external/images/media/12
 
 const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
-const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescription,  RNFS.MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
+const contentURI = await MediaStore.copyToMediaStore(fileDescription,  MediaStore.MEDIA_IMAGE, '/path/to/image/imageToCopy.png')
 ```
 
 ### `queryMediaStore`
@@ -445,16 +452,16 @@ const contentURI = await RNFS.MediaStore.copyToMediaStore(fileDescription,  RNFS
 // queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreFile | undefined>
 
 // Query by URI
-const result = await RNFS.MediaStore.queryMediaStore({
+const result = await MediaStore.queryMediaStore({
   uri: 'content://media/external/images/media/123',
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE
+  mediaType: MediaStore.MEDIA_IMAGE
 })
 
 // or query by filename and path
-const result = await RNFS.MediaStore.queryMediaStore({
+const result = await MediaStore.queryMediaStore({
   fileName: 'image.png',
   relativePath: 'MyAppFolder',
-  mediaType: RNFS.MediaStore.MEDIA_IMAGE
+  mediaType: MediaStore.MEDIA_IMAGE
 })
 
 // result will be MediaStoreFile or undefined if not found
@@ -470,7 +477,7 @@ if (result) {
 ```ts
 // deleteFromMediaStore(uri: string): Promise<boolean>
 
-await RNFS.MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
+await MediaStore.deleteFromMediaStore('content://media/external/images/media/123')
 ```
 
 ## FileDescription
@@ -532,7 +539,9 @@ type MediaStoreFile = {
 
 ## Migrating from v3.x to v4.x
 
-The v4.x release brings significant improvements with minimal breaking changes. Most apps can upgrade with little to no code changes!
+The v4.x release rewrites the native bridge on [Nitro Modules](https://github.com/mrousavy/nitro).
+Most call sites are unchanged, but there are real breaking changes — read this section before
+upgrading.
 
 ### Installation
 
@@ -550,10 +559,11 @@ npm install react-native-fs2@latest
 yarn add react-native-fs2@latest
 ```
 
+Requires React Native `>=0.82.0` and `react-native-nitro-modules@^0.37.0`.
+
 ### Breaking Changes
 
-#### Timestamps are now numbers
-The only significant breaking change is that timestamps are now returned as numbers (milliseconds since epoch) instead of Date objects:
+#### Timestamps are numbers, not Dates
 
 ```typescript
 // v3.x
@@ -562,37 +572,91 @@ const date = items[0].mtime; // Date object
 
 // v4.x
 const items = await RNFS.readDir(path);
-const timestamp = items[0].mtime; // number
-const date = new Date(items[0].mtime); // Convert to Date if needed
+const timestamp = items[0].mtime; // number (ms since epoch)
+const date = new Date(items[0].mtime);
 ```
 
-This affects:
-- `readDir()` - `ctime` and `mtime` fields
-- `stat()` - `ctime` and `mtime` fields
+Affects `ctime` and `mtime` on both `readDir()` and `stat()`.
+
+#### `MediaStore` moved to a named export
+
+`RNFS.MediaStore` is gone. Import it directly — see the [MediaStore](#mediastore) section.
+
+```typescript
+// v3.x
+import RNFS from 'react-native-fs2';
+await RNFS.MediaStore.queryMediaStore({ ... });
+
+// v4.x
+import { MediaStore } from 'react-native-fs2';
+await MediaStore.queryMediaStore({ ... });
+```
+
+#### `queryMediaStore` result shape changed, and can be `undefined`
+
+- Type renamed `MediaStoreQueryResult` → `MediaStoreFile`, and `FileDescriptor` →
+  `FileDescription`.
+- Property renamed `contentUri` → `uri`. New fields: `name`, `mimeType`, `size`, `dateAdded`,
+  `dateModified`, `relativePath`.
+- The return type is now `Promise<MediaStoreFile | undefined>` — a query that matches nothing
+  resolves `undefined` instead of rejecting.
+
+#### `MkdirOptions` keys renamed
+
+`NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` →
+`fileProtection`. The old keys are silently ignored, so this fails quietly if you miss it.
+
+#### `moveFile` and `copyFile` lost their `options` parameter
+
+Both now take `(filepath, destPath)` only. The iOS `NSFileProtectionKey` option is not
+available on them in 4.x.
+
+#### `downloadFile`: the `resumable` callback is now `canBeResumed`
+
+```typescript
+// v3.x
+RNFS.downloadFile({ fromUrl, toFile, resumable: () => {} });
+
+// v4.x
+RNFS.downloadFile({ fromUrl, toFile, canBeResumed: (event) => {} });
+```
+
+An unmigrated `resumable: () => {}` is ignored — it never fires.
+
+#### `completeHandlerIOS` was removed
+
+There is no replacement in 4.0. Background downloads (`background: true`) still start on iOS,
+but the library cannot invoke the system completion handler when one finishes while the app is
+suspended. Treat background downloads as unsupported in 4.0 if you relied on that handler.
+
+#### `MainBundlePath`
+
+Still available, unchanged.
 
 ### What Still Works
 
-✅ **All core file operations** - No changes required:
+✅ **All core file operations** — no changes required:
 ```typescript
 await RNFS.readFile(path, 'utf8');
 await RNFS.writeFile(path, content, 'utf8');
 await RNFS.copyFile(src, dest);
 await RNFS.moveFile(src, dest);
 await RNFS.unlink(path);
-// ... all other operations work the same!
 ```
 
-✅ **Download API** - Backward compatible:
+✅ **`isFile()` / `isDirectory()`** on both `readDir()` items and `stat()` results — still
+methods, as in 3.x.
+
+✅ **Download API**, apart from the `resumable` → `canBeResumed` rename above:
 ```typescript
 const { jobId, promise } = RNFS.downloadFile({
   fromUrl: url,
   toFile: path,
+  headers: { Authorization: 'Bearer ...' },
   begin: (res) => { },
   progress: (res) => { }
 });
 ```
-
-✅ **MediaStore** (Android) - Works the same
 
 ### New Features to Explore
 
