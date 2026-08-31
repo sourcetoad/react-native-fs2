@@ -72,8 +72,9 @@ await RNFS.mkdir(`FolderToCreate`);
 
  * Creates directory at `filepath` location.
  * Optionally include `MkdirOptions` with properties:
-   * `excludedFromBackup: boolean` (iOS) - maps to [NSURLIsExcludedFromBackupKey](https://developer.apple.com/documentation/foundation/nsurlisexcludedfrombackupkey). Renamed in 4.x; the old `NSURLIsExcludedFromBackupKey` key is ignored.
-   * `fileProtection: FileProtectionType` (iOS) - maps to [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey). Renamed in 4.x; the old `NSFileProtectionKey` key is ignored.
+   * `excludedFromBackup: boolean` (iOS) - maps to [NSURLIsExcludedFromBackupKey](https://developer.apple.com/documentation/foundation/nsurlisexcludedfrombackupkey). Renamed in 4.x. Pass `false` to un-exclude a directory.
+   * `fileProtection: FileProtectionType` (iOS) - maps to [NSFileProtectionKey](https://developer.apple.com/documentation/foundation/nsfileprotectionkey). Renamed in 4.x.
+ * Both options are iOS-only; Android has ignored them in every version.
 
 ### `moveFile`
 ```ts
@@ -143,20 +144,20 @@ const dirItems = await RNFS.readDir('DirPath')
   * name: `string` -> The name of the item
   * path: `string` -> The absolute path to the item
   * size: `number` -> Size in bytes
-  * isFile: `boolean` -> Is the item a file?
-  * isDirectory: `boolean` -> Is the item a directory?
+  * isFile: `() => boolean` -> Is the item a file? An accessor, as in 3.x.
+  * isDirectory: `() => boolean` -> Is the item a directory? An accessor, as in 3.x.
 
 
 ### `readFile`
 ```ts
-// readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string>
+// readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string | ArrayBuffer>
 const fileData = await RNFS.readFile('DirPath', 'utf8')
 ```
 * Reads the `filepath` and return the file `contents`
 * Optionally includes `EncodingOrOptions` with values:
   * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
-  * ...fileoptions
-* Note: `arraybuffer` support is built-in via Nitro Modules (no additional dependencies required)
+* Note: `arraybuffer` support is built-in via Nitro Modules (no additional dependencies required).
+  In 3.x it required the optional `react-native-blob-jsi-helper` dependency.
 
 ### `read`
 ```ts
@@ -166,15 +167,15 @@ const fileData = await RNFS.readFile('DirPath', 'utf8')
     length: number = 0,
     position: number = 0,
     encodingOrOptions?: EncodingOrOptions
-  ): Promise<string>
+  ): Promise<string | ArrayBuffer>
 */
 
 const fileData = await RNFS.read('FileToRead', 0, 0, 'utf8')
 ```
 * Reads bytes length from the given position of the file at `filepath` and returns the file `contents`.
 * Optionally includes `EncodingOrOptions` with values:
-  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
-  * ...fileoptions
+  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
+* `'arraybuffer'` works here in 4.x. In 3.x it threw `Invalid encoding type "arraybuffer"`.
 
 
 ### `hash`
@@ -207,8 +208,7 @@ await RNFS.appendFile('FileToWrite', 'ContentsToAppend', 'utf8')
 ```
 * Append the `contents` to `filepath`
 * Optionally includes `EncodingOrOptions` with values:
-  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
-  * ...fileoptions
+  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
 
 
 ### `write`
@@ -218,8 +218,7 @@ await RNFS.write('FileToWrite', 'ContentsToWrite', -1, 'utf8')
 ```
 * Write the `contents` to `filepath` at the given random access position. When position is undefined or -1 the contents is appended to the end of the file
 * Optionally includes `EncodingOrOptions` with values:
-  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
-  * ...fileoptions
+  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
 
 
 
@@ -414,7 +413,7 @@ await stream.close();
 * Creates a new media file in the MediaStore with the given `mimeType`. This will not create a file on the filesystem, but will create a reference in the MediaStore.
 
 ```ts
-// createMediaFile(fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
+// createMediaFile(fileDescription: FileDescription, mediatype: MediaCollectionType): Promise<string>
 
 const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
@@ -426,7 +425,7 @@ const contentURI = await MediaStore.createMediaFile(fileDescription,  MediaStore
 * Updates the media file in the MediaStore
 
 ```ts
-// updateMediaFile(uri: string, fileDescription: FileDescription, mediatype: MediaCollections): Promise<string>
+// updateMediaFile(uri: string, fileDescription: FileDescription, mediatype: MediaCollectionType): Promise<string>
 
 const contentURI = 'content://media/external/images/media/123'
 const fileDescription = { name: 'sample-updated-filename', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
@@ -449,7 +448,7 @@ await MediaStore.writeToMediaFile('content://media/external/images/media/123', '
 * Copies the file at `filepath` to the MediaStore with the given `mimeType`.
 
 ```ts
-// copyToMediaStore(fileDescription: FileDescription, mediatype: MediaCollections, path: string): Promise<string>
+// copyToMediaStore(fileDescription: FileDescription, mediatype: MediaCollectionType, path: string): Promise<string>
 
 const fileDescription = { name: 'sample', parentFolder: 'MyAppFolder', mimeType: 'image/png' }
 
@@ -507,7 +506,7 @@ type MediaStoreSearchOptions = {
   uri?: string;
   fileName?: string;
   relativePath?: string;
-  mediaType: MediaCollections
+  mediaType: MediaCollectionType
 };
 ```
 
@@ -631,7 +630,9 @@ await MediaStore.queryMediaStore({ ... });
 #### `MkdirOptions` keys renamed
 
 `NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` →
-`fileProtection`. The old keys are silently ignored, so this fails quietly if you miss it.
+`fileProtection`. Passed inline this is a compile error — TypeScript rejects the unknown key
+and suggests the new name. It only slips through silently if the options object reaches the
+call as a separately-typed variable, so check those by hand.
 
 #### `moveFile` and `copyFile` lost their `options` parameter
 
