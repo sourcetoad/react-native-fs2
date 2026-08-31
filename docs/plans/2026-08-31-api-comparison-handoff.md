@@ -1,7 +1,8 @@
 # Handoff — API comparison pass and on-device verification
 
-Branch `nitro-migration`, 26 commits on top of `73b542b`, plus the file-protection work
-described below sitting uncommitted in the working tree. All gates green.
+Branch `nitro-migration`, forked from `73b542b` (`git rev-list --count 73b542b..HEAD` for
+the current depth — a number written here is stale the moment it is committed). All gates
+green.
 
 ## What happened
 
