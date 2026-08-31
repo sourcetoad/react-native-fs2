@@ -4,12 +4,16 @@ import type {
   MkdirOptions,
   FSInfoResult,
   ReadDirItem as NativeReadDirItem,
-  DownloadFileOptions,
   DownloadEventResult,
   NativeStatResult,
   HashAlgorithm,
 } from './nitro/Fs2.nitro';
-import type { EncodingOrOptions, ReadDirItem, StatResult } from './types';
+import type {
+  DownloadFileOptions,
+  EncodingOrOptions,
+  ReadDirItem,
+  StatResult,
+} from './types';
 
 /**
  * Re-export types
@@ -18,11 +22,10 @@ export type {
   StatResultType,
   MkdirOptions,
   FSInfoResult,
-  DownloadFileOptions,
   DownloadEventResult,
 } from './nitro/Fs2.nitro';
 
-export type { ReadDirItem, StatResult } from './types';
+export type { DownloadFileOptions, ReadDirItem, StatResult } from './types';
 
 export type {
   MediaCollectionType,
@@ -220,15 +223,10 @@ const compat = {
     return RNFS2Nitro.scanFile(path);
   },
 
-  downloadFile(
-    options: DownloadFileOptions & {
-      begin?: (event: DownloadEventResult) => void;
-      progress?: (event: DownloadEventResult) => void;
-      complete?: (event: DownloadEventResult) => void;
-      error?: (event: DownloadEventResult) => void;
-      canBeResumed?: (event: DownloadEventResult) => void;
-    }
-  ): { jobId: number; promise: Promise<any> } {
+  downloadFile(options: DownloadFileOptions): {
+    jobId: number;
+    promise: Promise<any>;
+  } {
     const jobId = getJobId();
     const subscriptions: Array<() => void> = [];
 
@@ -283,6 +281,10 @@ const compat = {
       fromUrl: options.fromUrl,
       toFile: normalizeFilePath(options.toFile),
       background: !!options.background,
+      // Passed through rather than coerced: iOS treats an explicit `false` differently from
+      // "not set" (Downloader.swift:63,70,110).
+      discretionary: options.discretionary,
+      cacheable: options.cacheable,
       progressDivider: options.progressDivider || 0,
       progressInterval: options.progressInterval || 0,
       readTimeout: options.readTimeout || 15000,
@@ -292,7 +294,9 @@ const compat = {
 
     return {
       jobId,
-      promise: RNFS2Nitro.downloadFile(nitroOptions)
+      // `headers` is a separate argument on the Nitro method, not a field of the options
+      // struct. Both platforms read it; passing only one argument silently dropped it.
+      promise: RNFS2Nitro.downloadFile(nitroOptions, options.headers)
         .then((res: any) => {
           // unsubscribe all subscriptions
           subscriptions.forEach((unsubscribe) => unsubscribe());

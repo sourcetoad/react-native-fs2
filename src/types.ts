@@ -1,4 +1,8 @@
 import type {
+  DownloadFileOptions as DownloadFileOptionsNitro,
+  DownloadEventResult,
+} from './nitro/Fs2.nitro';
+import type {
   ReadStreamOptions as ReadStreamOptionsNitro,
   WriteStreamOptions as WriteStreamOptionsNitro,
   ReadStreamDataEvent as ReadStreamDataEventNitro,
@@ -26,6 +30,27 @@ export type ReadDirItem = {
   ctime?: number; // Created date (best effort; iOS provides it, Android reuses mtime)
   isFile: () => boolean; // Is the item just a file?
   isDirectory: () => boolean; // Is the item a directory?
+};
+
+/**
+ * Options accepted by `RNFS.downloadFile`.
+ *
+ * This is the consumer-facing shape, not the Nitro struct:
+ *
+ * - `jobId` is omitted. The wrapper allocates one and returns it alongside the promise, so
+ *   requiring callers to supply it made `downloadFile({ fromUrl, toFile })` - the 3.x call -
+ *   a type error.
+ * - `headers` lives here even though the Nitro method takes it as a separate argument. The
+ *   wrapper splits it back out.
+ * - The event callbacks are registered as Nitro listeners rather than forwarded natively.
+ */
+export type DownloadFileOptions = Omit<DownloadFileOptionsNitro, 'jobId'> & {
+  headers?: Record<string, string>; // Request headers to send to the server
+  begin?: (event: DownloadEventResult) => void;
+  progress?: (event: DownloadEventResult) => void;
+  complete?: (event: DownloadEventResult) => void;
+  error?: (event: DownloadEventResult) => void;
+  canBeResumed?: (event: DownloadEventResult) => void; // iOS only
 };
 
 export type StatResult = {

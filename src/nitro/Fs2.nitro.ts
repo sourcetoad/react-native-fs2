@@ -52,7 +52,6 @@ export interface DownloadFileOptions {
   cacheable?: boolean; // iOS only: Whether the download can be stored in the shared NSURLCache
   progressInterval?: number;
   progressDivider?: number;
-  resumable?: boolean; // iOS only: Whether the download is resumable
   connectionTimeout?: number; // Android only: Connection timeout in ms
   readTimeout?: number; // Android/iOS: Read timeout in ms
   backgroundTimeout?: number; // iOS only: Max time (ms) to download resource in background

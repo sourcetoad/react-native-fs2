@@ -43,11 +43,9 @@ const Example = () => {
       runStatus += `\n- Downloading file from ${FILE_URL}`;
       setResult(runStatus);
 
-      const jobId = Date.now();
       RNFS.downloadFile({
         fromUrl: FILE_URL,
         toFile: filePath,
-        jobId,
         begin: (event) => {
           console.log('downloadFile begin', event);
         },
@@ -84,7 +82,6 @@ const Example = () => {
       RNFS.downloadFile({
         fromUrl: FILE_URL2,
         toFile: filePath2,
-        jobId,
         begin: (event) => {
           console.log('downloadFile begin', event);
         },
