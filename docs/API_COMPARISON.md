@@ -98,38 +98,31 @@ is caught by the compiler rather than silently misreading it. A missing `ctime` 
 
 | Function | master (3.x) | nitro (4.x) | What changed |
 |---|---|---|---|
-| `downloadFile` | `downloadFile(options: DownloadFileOptions): DownloadFileResult` | `downloadFile(options: DownloadFileOptions): { jobId: number; promise: Promise<any> }` | 💥 **The promise's resolved value changed — see below.** The call shape and the `{ jobId, promise }` wrapper are the same. The options type changed (section 7). `headers` works. Internally the RN `NativeEventEmitter` events (`DownloadBegin`, `DownloadProgress`, `DownloadResumable`) were replaced by per-jobId Nitro listeners, and the `hasBeginCallback` / `hasProgressCallback` / `hasResumableCallback` bridge flags are gone. |
+| `downloadFile` | `downloadFile(options: DownloadFileOptions): DownloadFileResult` | `downloadFile(options: DownloadFileOptions): DownloadFileResult` | 🔁 Same call shape, same `{ jobId, promise }` return, and the promise resolves `DownloadResult` as before — see below. The options type changed (section 7). `headers` works. Internally the RN `NativeEventEmitter` events (`DownloadBegin`, `DownloadProgress`, `DownloadResumable`) were replaced by per-jobId Nitro listeners, and the `hasBeginCallback` / `hasProgressCallback` / `hasResumableCallback` bridge flags are gone. |
 | `stopDownload` | `stopDownload(jobId: number): void` | `stopDownload(jobId: number): Promise<void>` | 🔁 Now async. Fire-and-forget callers are unaffected; the promise is there if you want to await it. |
 | `resumeDownload` | `resumeDownload(jobId: number): void` — iOS only, **no Android implementation at all** | `resumeDownload(jobId: number): Promise<void>` — iOS only | 🔁 Now async on iOS, which is source-compatible. Master's Java exported no `resumeDownload`, so 3.x Android threw a `TypeError`; 4.x rejects `ENOTSUP` (`Fs2.kt:437-441`). It briefly no-opped silently. |
 | `isResumable` | `isResumable(jobId: number): Promise<boolean>` — iOS only, **no Android implementation at all** | `isResumable(jobId: number): Promise<boolean>` — iOS only | 🔁 Unchanged on iOS. 3.x Android threw a `TypeError`; 4.x rejects `ENOTSUP` (`Fs2.kt:447-451`). It briefly resolved `false`, which is indistinguishable from a genuine "not resumable". |
 | `completeHandlerIOS` | `completeHandlerIOS(jobId: number): void` (iOS) | — | ❌ **Removed, no replacement.** Told iOS you had finished handling a completed background download, so the library could fire the stored system completion handler (`master:ios/RNFSManager.m:591-603`). Deferred by maintainer decision. **Consequence:** `background: true` still creates a background `URLSession` on iOS (`ios/Downloader.swift:62`) that cannot be completed while the app is suspended, so treat background downloads as unsupported in 4.0. |
 
-### 💥 The download promise no longer resolves a result object
+### The download promise resolves `DownloadResult`, as in 3.x
 
-In 3.x, `(await downloadFile(opts).promise)` gave you a `DownloadResult`:
-
-```ts
-const { statusCode, bytesWritten } = await RNFS.downloadFile(opts).promise  // 3.x
-```
-
-Both natives built that object — `master:ios/RNFSManager.m:501-508` and
-`master:RNFSManager.java:462-467` — and `master:README.md` documents it as the return
-contract.
-
-In 4.x the Nitro method is `Promise<Double>` and resolves **the jobId alone**
-(`ios/Fs2.swift:641`; `Fs2.kt:353`, `Fs2.kt:380`). The wrapper returns it untouched
-(`src/index.ts:299-305`). Because the promise is typed `Promise<any>` (`src/index.ts:228`),
-the destructure above still **compiles and runs**, and both bindings are `undefined`.
-
-Get status and byte count from the new `complete` callback instead:
+The Nitro method itself resolves the jobId alone — completion data travels over the
+`listenToDownloadComplete` event by design (`MIGRATION_CHECKLIST.md:40`, and the spec comment
+at `src/nitro/Fs2.nitro.ts:116-119`). The JS wrapper subscribes to that event unconditionally
+and rebuilds the 3.x shape, so this keeps working:
 
 ```ts
-const { promise } = RNFS.downloadFile({
-  ...opts,
-  complete: ({ statusCode, bytesWritten }) => { /* … */ },
-})
-await promise   // resolves the jobId
+const { statusCode, bytesWritten } = await RNFS.downloadFile(opts).promise
 ```
+
+The wrapper briefly passed the native return value straight through, resolving a bare number
+while still typed `Promise<any>` — silent, since nothing objected at compile or run time. Fixed
+on this branch (`src/index.ts:336-353`).
+
+One declaration change: `statusCode`/`bytesWritten` are **optional** on `DownloadResult` now.
+3.x declared them required, but that was wrong even then — its iOS native attached each key
+only when the value was non-nil (`master:ios/RNFSManager.m:501-508`) — and a download stopped
+through `stopDownload()` settles with neither.
 
 ### Download callbacks
 
@@ -139,7 +132,7 @@ await promise   // resolves the jobId
 | `progress` | `progress?: (res: DownloadProgressCallbackResult) => void` | `progress?: (event: DownloadEventResult) => void` | ⚠️ Same unification. `contentLength` and `bytesWritten` are now optional. |
 | `resumable` | `resumable?: () => void` (iOS) | — | ⚠️ **Renamed to `canBeResumed`.** Passed inline, an unmigrated `resumable: () => {}` is a compile error (`TS2353`); reaching the call inside a pre-typed variable it is dropped and simply never fires. (A vestigial `resumable?: boolean` option briefly existed in the 4.x spec; it was read by nothing on either platform and has been removed.) |
 | `canBeResumed` | — | `canBeResumed?: (event: DownloadEventResult) => void` (iOS) | ➕ The replacement for `resumable`. |
-| `complete` | — | `complete?: (event: DownloadEventResult) => void` | ➕ New, and now the **only** way to get `statusCode`/`bytesWritten` — see above. |
+| `complete` | — | `complete?: (event: DownloadEventResult) => void` | ➕ New. Fires with `statusCode`/`bytesWritten` when the download finishes; the promise carries the same values. |
 | `error` | — | `error?: (event: DownloadEventResult) => void` | ➕ New. Master signalled failure only by rejecting the promise. |
 
 ### `discretionary` and `cacheable` went from inert to live
@@ -236,8 +229,8 @@ consumers until this branch (`src/index.ts:21-29`).
 | `Headers` / `Fields` | `{ [name: string]: string }` | — (inlined as `Record<string, string>`) | 🔁 The alias names are gone from the source, but they were never reachable from the package root anyway (see the preamble). The shape is unchanged, so `Record<string, string>` is a drop-in. `Fields` was dead on master too — declared, referenced by no API. |
 | `DownloadBeginCallbackResult` | `{ jobId; statusCode; contentLength; headers }` | — | 🔁 Replaced by `DownloadEventResult`. |
 | `DownloadProgressCallbackResult` | `{ jobId; contentLength; bytesWritten }` | — | 🔁 Replaced by `DownloadEventResult`. |
-| `DownloadResult` | `{ jobId; statusCode; bytesWritten }` | — | 💥 Not merely renamed — **nothing resolves this shape any more.** The download promise now resolves a bare jobId number; the fields moved to the `complete` callback's `DownloadEventResult`. See section 4. |
-| `DownloadFileResult` | `{ jobId: number; promise: Promise<DownloadResult> }` | — (return type is inlined) | 💥 The returned object still has `jobId` and `promise`, but the promise is typed `Promise<any>` and resolves a number. The `any` is what makes the change silent. |
+| `DownloadResult` | `{ jobId; statusCode; bytesWritten }` | `{ jobId; statusCode?; bytesWritten? }` | 🔁 Still what `downloadFile().promise` resolves, and now exported from the package root. `statusCode`/`bytesWritten` became optional — see section 4 for why the 3.x declaration was wrong. |
+| `DownloadFileResult` | `{ jobId: number; promise: Promise<DownloadResult> }` | `{ jobId: number; promise: Promise<DownloadResult> }` | ✅ Same shape, and exported from the package root in 4.x (it was not importable on 3.x — see the preamble). |
 | `DownloadEventResult` | — | `{ jobId: number; headers?: AnyMap; contentLength?: number; statusCode?: number; bytesWritten?: number; error?: string }` | ➕ One payload for all five download callbacks. Everything except `jobId` is optional, so fields that were required in the 3.x per-callback types now need narrowing. `headers` is Nitro's opaque `AnyMap`, not `Record<string, string>`. |
 | `FileDescriptor` | `{ name; parentFolder; mimeType }` | — | 🔁 Renamed to `FileDescription`; same fields. |
 | `FileDescription` | — | `{ name; mimeType; parentFolder }` | ➕ The rename target, and unlike the master original it **is** exported. |

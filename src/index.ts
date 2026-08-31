@@ -10,6 +10,7 @@ import type {
 } from './nitro/Fs2.nitro';
 import type {
   DownloadFileOptions,
+  DownloadFileResult,
   EncodingOrOptions,
   ReadDirItem,
   StatResult,
@@ -28,7 +29,13 @@ export type {
   NativeStatResult,
 } from './nitro/Fs2.nitro';
 
-export type { DownloadFileOptions, ReadDirItem, StatResult } from './types';
+export type {
+  DownloadFileOptions,
+  DownloadFileResult,
+  DownloadResult,
+  ReadDirItem,
+  StatResult,
+} from './types';
 
 export type {
   MediaCollectionType,
@@ -236,12 +243,15 @@ const compat = {
     return RNFS2Nitro.scanFile(path);
   },
 
-  downloadFile(options: DownloadFileOptions): {
-    jobId: number;
-    promise: Promise<any>;
-  } {
+  downloadFile(options: DownloadFileOptions): DownloadFileResult {
     const jobId = getJobId();
     const subscriptions: Array<() => void> = [];
+
+    // The Nitro method resolves the jobId alone - completion data travels over the
+    // `listenToDownloadComplete` event by design (MIGRATION_CHECKLIST.md:40). 3.x resolved
+    // `{ jobId, statusCode, bytesWritten }`, so capture the event here and rebuild that shape
+    // rather than handing callers a bare number they would have to notice.
+    let completion: DownloadEventResult | undefined;
 
     if (options.begin) {
       downloadListeners.begin.set(jobId, options.begin);
@@ -261,15 +271,18 @@ const compat = {
         })
       );
     }
-    if (options.complete) {
-      downloadListeners.complete.set(jobId, options.complete);
-      subscriptions.push(
-        RNFS2Nitro.listenToDownloadComplete(jobId, (event) => {
-          const cb = downloadListeners.complete.get(event.jobId);
-          if (cb) cb(event);
-        })
-      );
-    }
+    // Registered unconditionally, unlike the other four: the promise needs this event even
+    // when the caller passed no `complete` callback.
+    downloadListeners.complete.set(jobId, (event) => {
+      completion = event;
+      options.complete?.(event);
+    });
+    subscriptions.push(
+      RNFS2Nitro.listenToDownloadComplete(jobId, (event) => {
+        const cb = downloadListeners.complete.get(event.jobId);
+        if (cb) cb(event);
+      })
+    );
     if (options.error) {
       downloadListeners.error.set(jobId, options.error);
       subscriptions.push(
@@ -305,18 +318,37 @@ const compat = {
       backgroundTimeout: options.backgroundTimeout || 3600000, // 1 hour
     };
 
+    // Both the Nitro unsubscribes and this jobId's entries in `downloadListeners`, which would
+    // otherwise accumulate for the lifetime of the module.
+    const release = () => {
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+      downloadListeners.begin.delete(jobId);
+      downloadListeners.progress.delete(jobId);
+      downloadListeners.complete.delete(jobId);
+      downloadListeners.error.delete(jobId);
+      downloadListeners.canBeResumed.delete(jobId);
+    };
+
     return {
       jobId,
       // `headers` is a separate argument on the Nitro method, not a field of the options
       // struct. Both platforms read it; passing only one argument silently dropped it.
       promise: RNFS2Nitro.downloadFile(nitroOptions, options.headers)
-        .then((res: any) => {
-          // unsubscribe all subscriptions
-          subscriptions.forEach((unsubscribe) => unsubscribe());
+        .then((resolvedJobId: number) => {
+          release();
 
-          return res;
+          // `complete` fires before the native promise settles on both platforms - iOS resumes
+          // its continuation in downloadCleanup (ios/Fs2.swift:871-878), Android in onCleanup
+          // (Fs2.kt:380) - so `completion` is populated by the time we get here. A download
+          // stopped via stopDownload() settles without a complete event, hence the fallback.
+          return {
+            jobId: completion?.jobId ?? resolvedJobId,
+            statusCode: completion?.statusCode,
+            bytesWritten: completion?.bytesWritten,
+          };
         })
         .catch((e: any) => {
+          release();
           return Promise.reject(e);
         }),
     };

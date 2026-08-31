@@ -138,6 +138,63 @@ describe('downloadFile', () => {
     }
   });
 
+  // 3.x resolved { jobId, statusCode, bytesWritten }. The Nitro method resolves the jobId
+  // alone and sends the rest over the complete event, so the wrapper reassembles the 3.x shape.
+  it('resolves the 3.x DownloadResult, not the bare jobId', async () => {
+    mockNitro.listenToDownloadComplete = jest.fn(
+      (jobId: number, cb: (e: any) => void) => {
+        cb({ jobId, statusCode: 200, bytesWritten: 1024 });
+        return () => {};
+      }
+    );
+
+    const { promise } = RNFS.downloadFile({
+      fromUrl: 'https://example.com/a.bin',
+      toFile: '/tmp/a.bin',
+    });
+
+    await expect(promise).resolves.toEqual({
+      jobId: expect.any(Number),
+      statusCode: 200,
+      bytesWritten: 1024,
+    });
+  });
+
+  // A download stopped through stopDownload() settles without a complete event.
+  it('falls back to the native jobId when no complete event arrives', async () => {
+    const { promise } = RNFS.downloadFile({
+      fromUrl: 'https://example.com/a.bin',
+      toFile: '/tmp/a.bin',
+    });
+
+    await expect(promise).resolves.toEqual({
+      jobId: 1,
+      statusCode: undefined,
+      bytesWritten: undefined,
+    });
+  });
+
+  it('still invokes a caller-supplied complete callback', async () => {
+    const complete = jest.fn();
+    mockNitro.listenToDownloadComplete = jest.fn(
+      (jobId: number, cb: (e: any) => void) => {
+        cb({ jobId, statusCode: 204, bytesWritten: 0 });
+        return () => {};
+      }
+    );
+
+    const { promise } = RNFS.downloadFile({
+      fromUrl: 'https://example.com/a.bin',
+      toFile: '/tmp/a.bin',
+      complete,
+    });
+    await promise;
+
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 204, bytesWritten: 0 })
+    );
+  });
+
   it('passes headers as the second argument', async () => {
     const headers = { Authorization: 'Bearer token' };
 

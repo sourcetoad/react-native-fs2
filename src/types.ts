@@ -53,6 +53,25 @@ export type DownloadFileOptions = Omit<DownloadFileOptionsNitro, 'jobId'> & {
   canBeResumed?: (event: DownloadEventResult) => void; // iOS only
 };
 
+/**
+ * What `downloadFile().promise` resolves to.
+ *
+ * `statusCode`/`bytesWritten` are optional, unlike 3.x which declared them required. That
+ * declaration was wrong even on 3.x - its iOS native only attached each key when the value was
+ * non-nil (master:ios/RNFSManager.m:501-508) - and a download stopped through `stopDownload()`
+ * settles with neither.
+ */
+export type DownloadResult = {
+  jobId: number;
+  statusCode?: number;
+  bytesWritten?: number;
+};
+
+export type DownloadFileResult = {
+  jobId: number;
+  promise: Promise<DownloadResult>;
+};
+
 export type StatResult = {
   type?: any; // TODO
   name?: string; // The name of the item

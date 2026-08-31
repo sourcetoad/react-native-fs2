@@ -701,7 +701,9 @@ signatures are unchanged but the outcome is not.
 ✅ **`isFile()` / `isDirectory()`** on both `readDir()` items and `stat()` results — still
 methods, as in 3.x.
 
-✅ **Download API**, apart from the `resumable` → `canBeResumed` rename above:
+✅ **Download API**, apart from the `resumable` → `canBeResumed` rename above. The promise
+still resolves `{ jobId, statusCode, bytesWritten }`, though `statusCode` and `bytesWritten`
+are now optional — a download stopped with `stopDownload()` settles without them:
 ```typescript
 const { jobId, promise } = RNFS.downloadFile({
   fromUrl: url,
