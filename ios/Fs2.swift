@@ -321,6 +321,9 @@ class Fs2: HybridFs2Spec {
       case .sha1:
         digest = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
         CC_SHA1(data.bytes, CC_LONG(data.length), &digest)
+      case .sha224:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA224_DIGEST_LENGTH))
+        CC_SHA224(data.bytes, CC_LONG(data.length), &digest)
       case .sha256:
         digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         CC_SHA256(data.bytes, CC_LONG(data.length), &digest)

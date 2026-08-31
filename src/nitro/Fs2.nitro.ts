@@ -71,7 +71,13 @@ export type DownloadEventResult = {
 };
 
 // Define the new type for hash algorithm
-export type HashAlgorithm = 'md5' | 'sha1' | 'sha256' | 'sha384' | 'sha512';
+export type HashAlgorithm =
+  | 'md5'
+  | 'sha1'
+  | 'sha224'
+  | 'sha256'
+  | 'sha384'
+  | 'sha512';
 
 export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   // Path Constants

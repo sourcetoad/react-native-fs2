@@ -23,6 +23,9 @@ export type {
   MkdirOptions,
   FSInfoResult,
   DownloadEventResult,
+  HashAlgorithm,
+  FileProtectionType,
+  NativeStatResult,
 } from './nitro/Fs2.nitro';
 
 export type { DownloadFileOptions, ReadDirItem, StatResult } from './types';

@@ -83,7 +83,7 @@ is caught by the compiler rather than silently misreading it. A missing `ctime` 
 | `appendFile` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | ✅ Master did not forward options here either, so nothing is lost. Both create the file if it is missing (`master:ios/RNFSManager.m:139-148`; `ios/Fs2.swift:466-479`). |
 | `write` | `write(filepath, contents, position?, encodingOrOptions?): Promise<null>` | `write(filepath, contents, position?, encodingOrOptions?): Promise<void>` | 🔁 Declared return type only. Master declared `Promise<null>` but resolved `undefined`; 4.x declares what it does. `position` still defaults to append: master coerced `undefined` to `-1` in JS, 4.x passes `undefined` and both natives treat a missing/negative position as "seek to end" (`ios/Fs2.swift:590-593`; `Fs2.kt:278` → `RNFSManager.kt:133`). |
 | `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | ⚠️ Same signature, changed result shape — see `StatResult` in section 7 and the timestamps subsection above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). |
-| `hash` | `hash(filepath: string, algorithm: string): Promise<string>` | `hash(filepath: string, algorithm: HashAlgorithm): Promise<string>` | ⚠️ `algorithm` narrowed from `string` to `'md5' \| 'sha1' \| 'sha256' \| 'sha384' \| 'sha512'`. **`sha224` was dropped.** Master implemented it on both platforms (`master:RNFSManager.java:252`, `master:ios/RNFSManager.m:359`, `master:ios/RNFSManager.m:384-385`) and `master:README.md:164` documents it as public API. It is unreachable in 4.x by every route: the TS union excludes it, and so do both generated enums (`nitrogen/generated/ios/swift/HashAlgorithm.swift`, `nitrogen/generated/android/kotlin/…/HashAlgorithm.kt`, which is `MD5, SHA1, SHA256, SHA384, SHA512`). The 4.x Kotlin helper still lists `sha224` in its lookup map (`RNFSManager.kt:184`) but nothing can reach it — `Fs2.kt:302` can only pass an enum case. Note `HashAlgorithm` **is not exported from the package root**, so you cannot name this parameter's type in your own code. |
+| `hash` | `hash(filepath: string, algorithm: string): Promise<string>` | `hash(filepath: string, algorithm: HashAlgorithm): Promise<string>` | ⚠️ `algorithm` narrowed from `string` to the `HashAlgorithm` union, so an unsupported name is now a compile error instead of a runtime rejection. All six 3.x algorithms are supported: `sha224` was briefly dropped from the union and both generated enums, and has been restored on this branch (`src/nitro/Fs2.nitro.ts:76-82`, `ios/Fs2.swift:324-326`; Kotlin needed no change - `RNFSManager.kt:184` already mapped it). `HashAlgorithm` is exported from the package root, so you can name the parameter type. |
 | `touch` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | 💥 **on Android — see the defect note below.** Public signature unchanged, still takes `Date`. Master gated `ctime` behind a JS-side `Platform.OS === 'ios'` check (`master:src/index.ts:357-358`); 4.x passes both through and lets native decide. Android still only applies `mtime` (`Fs2.kt:312-315`). |
 
 ### 🐞 Known defect: `touch` is off by 1000× on Android in 4.x
@@ -234,26 +234,19 @@ Three things to take from that table:
 failed on 3.x too. The master column describes `master:src/types.ts`, which was
 package-internal.
 
-Conversely, three types this document lists as 4.x additions are **also not exported** from
-the package root. Verified by compiling against `src/index.ts`: each gives
-`TS2614: Module has no exported member`.
-
-| Not exported in 4.x | Where it lives | Why it stings |
-|---|---|---|
-| `HashAlgorithm` | `src/nitro/Fs2.nitro.ts:71` | It is the parameter type of `hash()`. You cannot name it to write a typed wrapper. |
-| `FileProtectionType` | `src/nitro/Fs2.nitro.ts:26-30` | It is the type of `MkdirOptions.fileProtection`, and `MkdirOptions` *is* exported. |
-| `NativeStatResult` | `src/nitro/Fs2.nitro.ts:16-23` | Internal only. Listed here because it is the raw struct behind `StatResult`. |
-
-Adding these to the re-export block at `src/index.ts:21-35` would be a one-line fix.
+All 4.x types named in this document are now exported from the package root, including
+`HashAlgorithm`, `FileProtectionType` and `NativeStatResult` — the first two appear in public
+signatures (`hash()`'s parameter and `MkdirOptions.fileProtection`) and were unnameable by
+consumers until this branch (`src/index.ts:21-29`).
 
 | Type | master (3.x) | nitro (4.x) | What changed |
 |---|---|---|---|
 | `ReadDirItem` | `{ ctime: Date \| undefined; mtime: Date \| undefined; name; path; size; isFile(): boolean; isDirectory(): boolean }` | `{ name; path; size; mtime: number; ctime?: number; isFile(): boolean; isDirectory(): boolean }` | ⚠️ `ctime`/`mtime` are numbers in **milliseconds** — see the timestamps subsection in section 1. `.getTime()` on them is a compile error, so 3.x call sites are caught. Master's declared type said `Date \| undefined` while the code resolved `null` (`master:src/index.ts:209-210`), so the type was wrong there too. In 4.x `mtime` is required; `ctime` is omitted rather than nulled, and on Android `readDir` never populates it at all (`Fs2.kt:138` passes `null`) while `stat` reuses `mtime`. **`isFile()`/`isDirectory()` remain methods** — a maintainer decision, so `items[0].isFile()` keeps working. |
 | `StatResult` | `{ type: any; name: string \| undefined; path; size; mode; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | `{ type?: any; name?: string; path; size; mode: number; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | ⚠️ for the timestamp type; otherwise 4.x is the more honest declaration. Master's type said `ctime`/`mtime` were `number` while `stat()` actually resolved `Date` objects — it went unnoticed because `NativeModules.RNFSManager` is `any`, so nothing type-checked the mapping. 4.x really does return numbers, in milliseconds. `type` and `name` are marked optional because **neither is populated** by `stat()` — equally true on master, where the type simply claimed otherwise. `mode` is iOS-only natively and is `0` on Android rather than absent. The native `type` is now the `'file' \| 'directory'` union `StatResultType` instead of the numeric `RNFSFileTypeRegular`/`RNFSFileTypeDirectory` constants (which are gone). |
 | `MkdirOptions` | `{ NSURLIsExcludedFromBackupKey?: boolean; NSFileProtectionKey?: string }` | `{ excludedFromBackup?: boolean; fileProtection?: FileProtectionType }` | ⚠️ Both keys renamed. Compile error on an object literal; silently ignored via a widened variable. |
-| `FileProtectionType` | — (was a loose `string`) | `'NSFileProtectionNone' \| 'NSFileProtectionComplete' \| 'NSFileProtectionCompleteUnlessOpen' \| 'NSFileProtectionCompleteUntilFirstUserAuthentication'` | ➕ New union replacing the free-form string. **Not exported** — see above. |
+| `FileProtectionType` | — (was a loose `string`) | `'NSFileProtectionNone' \| 'NSFileProtectionComplete' \| 'NSFileProtectionCompleteUnlessOpen' \| 'NSFileProtectionCompleteUntilFirstUserAuthentication'` | ➕ New union replacing the free-form string. Exported. |
 | `FileOptions` | `{ NSFileProtectionKey?: string }` | — | ❌ Removed with the `moveFile`/`copyFile` options parameter. |
-| `HashAlgorithm` | — (`algorithm: string`) | `'md5' \| 'sha1' \| 'sha256' \| 'sha384' \| 'sha512'` | ⚠️ New union; drops `sha224`, which master supported and documented. **Not exported** — see above. |
+| `HashAlgorithm` | — (`algorithm: string`) | `'md5' \| 'sha1' \| 'sha224' \| 'sha256' \| 'sha384' \| 'sha512'` | ⚠️ New union covering exactly the six algorithms master implemented. Exported. |
 | `DownloadFileOptions` | `{ fromUrl; toFile; headers?; background?; discretionary?; cacheable?; progressInterval?; progressDivider?; begin?; progress?; resumable?; connectionTimeout?; readTimeout?; backgroundTimeout? }` | Same minus `resumable`, plus `complete?`, `error?`, `canBeResumed?` | ⚠️ `resumable` callback gone (section 4). `headers` still carries over. `discretionary` and `cacheable` carry over *as declarations* but change behaviour — they were dead on master and are live in 4.x (section 4). `jobId` is deliberately **not** part of this type — the library allocates it and returns it. |
 | `Headers` / `Fields` | `{ [name: string]: string }` | — (inlined as `Record<string, string>`) | 🔁 The alias names are gone from the source, but they were never reachable from the package root anyway (see the preamble). The shape is unchanged, so `Record<string, string>` is a drop-in. `Fields` was dead on master too — declared, referenced by no API. |
 | `DownloadBeginCallbackResult` | `{ jobId; statusCode; contentLength; headers }` | — | 🔁 Replaced by `DownloadEventResult`. |
@@ -272,7 +265,7 @@ Adding these to the re-export block at `src/index.ts:21-35` would be a one-line 
 | `EncodingOrOptions` | `Encoding \| Record<string, any>` | `Encoding \| { encoding?: Encoding }` | ⚠️ Narrowed. Master accepted arbitrary extra keys — which is how `FileOptions` rode along with `writeFile` — so 4.x rejecting them is what turns that drop into a compile error rather than a silent one. |
 | `ProcessedOptions` | `Record<string, any \| Encoding>` | — | 🔁 Internal type on both sides. |
 | `StatResultType` | — | `'file' \| 'directory'` | ➕ Replaces the numeric `RNFSFileTypeRegular` / `RNFSFileTypeDirectory` native constants. Exported. |
-| `NativeStatResult` | — | `{ mode?; ctime; mtime; size; type; originalFilepath }` | ➕ The raw native struct. **Not exported** — see above. `StatResult` is what `stat()` returns. |
+| `NativeStatResult` | — | `{ mode?; ctime; mtime; size; type; originalFilepath }` | ➕ The raw native struct, exported for advanced use. `StatResult` is what `stat()` returns, and is what you want unless you are wrapping the Nitro object directly. |
 
 ## 8. File Streaming API — all new in 4.x ➕
 
@@ -320,7 +313,7 @@ return.
 | Error messages | `CODE: message` from native | `CODE: message`, preserved through Nitro on both platforms | 🔁 Nitro mangles thrown errors differently per platform. 4.x adds `JsVisibleError` on Android (`android/.../utils/JsVisibleError.kt`) and `CustomStringConvertible` on the iOS stream errors (`ios/StreamError.swift:3`) so `err.message.startsWith('ENOENT')` still works. Same contract, different machinery. |
 | Unsupported operations | Mixed / unprefixed | `ENOTSUP: …` | 🔁 iOS MediaStore stubs and the Android API-level guards carry the code prefix. ⚠️ **Not universal** — iOS `scanFile` and `getAllExternalFilesDirs` resolve `[]` instead of rejecting `ENOTSUP` (section 3). |
 | `RNFSFileTypeRegular` / `RNFSFileTypeDirectory` | Native constants, read off the module | — | 🔁 Gone. Never documented as public API, but reachable via `NativeModules.RNFSManager` and used by master's own `stat`/`readDir` mapping. Use `stat().isFile()` / the `StatResultType` union instead. |
-| `RNFSFileProtection*` constants | Four native constants on iOS (`master:ios/RNFSManager.m:692-695`) | — | 🔁 Gone. Also undocumented but reachable via `NativeModules.RNFSManager`. Their four values are exactly the `FileProtectionType` union — which is not exported (section 7). |
+| `RNFSFileProtection*` constants | Four native constants on iOS (`master:ios/RNFSManager.m:692-695`) | — | 🔁 Gone. Also undocumented but reachable via `NativeModules.RNFSManager`. Their four values are exactly the `FileProtectionType` union, which is exported (section 7). |
 
 ---
 
@@ -365,7 +358,6 @@ grep -rn "NSFileProtectionKey\|NSURLIsExcludedFromBackupKey" src/   # renamed; a
 grep -rn "resumable:"                                              # download callback, now canBeResumed
 grep -rn "queryMediaStore"                                         # resolves undefined; needs a null check under strict
 grep -rn "moveFile(.*,.*,\|copyFile(.*,.*,"                        # third options argument removed
-grep -rn "sha224"                                                  # dropped from HashAlgorithm
 ```
 
 ### Caught on first run
@@ -379,7 +371,4 @@ grep -rn "completeHandlerIOS"     # removed, no replacement
 
 - **`touch` on Android is off by 1000×** — `RNFSManager.kt:449` multiplies an
   already-millisecond value by 1000. See section 2.
-- **`HashAlgorithm`, `FileProtectionType` and `NativeStatResult` are not exported** from the
-  package root, though `hash()` and `MkdirOptions` need the first two to be nameable. See
-  section 7.
 - **iOS background downloads are unusable** without `completeHandlerIOS`. See section 4.

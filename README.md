@@ -175,10 +175,14 @@ const fileData = await RNFS.read('FileToRead', 0, 0, 'utf8')
 
 ### `hash`
 ```ts
-// hash(filepath: string, algorithm: string): Promise<string>
+// hash(filepath: string, algorithm: HashAlgorithm): Promise<string>
 const fileChecksum = await RNFS.hash('FileToHash', 'md5')
 ```
-* Reads the `filepath` and returns its checksum as determined by algorithm, which can be one of the following `md5`  |  `sha1` | `sha224` | `sha256` | `sha384` | `sha512`.
+* Reads the `filepath` and returns its checksum as determined by algorithm, which is one of
+  `md5` | `sha1` | `sha224` | `sha256` | `sha384` | `sha512`.
+* The algorithm is typed as the `HashAlgorithm` union in 4.x, so an unsupported name is a
+  compile error rather than a runtime rejection. Import it if you need to name the type:
+  `import type { HashAlgorithm } from 'react-native-fs2'`.
 
 ### `writeFile`
 ```ts
