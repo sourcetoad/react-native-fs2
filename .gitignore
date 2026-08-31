@@ -98,3 +98,7 @@ android/generated
 
 # React Native Nitro Modules
 nitrogen/
+
+# Session handoff and planning notes - kept locally, not versioned.
+# Recover an older one from history: git show 9460dc9:docs/plans/<file>
+docs/plans/
