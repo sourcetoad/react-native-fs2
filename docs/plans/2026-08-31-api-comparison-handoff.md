@@ -31,6 +31,7 @@ errors. Compiling found none. Running on a device found four:
 | device run | the `complete` event races the native promise on iOS, so `statusCode` came back `undefined` |
 | device run | `stat()` on a `content://` URI reported `mtime: 0` (1970) |
 | device run | iOS MediaStore stubs threw synchronously, so Nitro prefixed the method name and broke `startsWith('ENOTSUP')` |
+| device run | iOS `closeWriteStream` cancelled the writer mid-queue, silently truncating `copyFileWithProgress` |
 
 Three of those live in files the earlier review had listed as **unreviewed**. That list is
 predictive, not decorative.
@@ -60,7 +61,7 @@ cd example/ios && xcodebuild -project Pods/Pods.xcodeproj -target RNFS2 \
 
 The fourth is easy to miss and covers a lot: most fixes this session were Swift, and nothing
 else compiles it. Expect two pre-existing warnings — `CC_MD5` deprecation in `Fs2.swift`, an
-unused `try?` at `Fs2Stream.swift:119`.
+unused `try?` at `Fs2Stream.swift:118`.
 
 > **Never pass `clean` to that xcodebuild command.** It deletes
 > `example/ios/build/generated/ios/ReactCodegen`, which is React Native codegen output the
@@ -70,8 +71,8 @@ unused `try?` at `Fs2Stream.swift:119`.
 ## On-device verification
 
 `example/src/verify.ts` runs on app launch, exercises the real native layer, renders a
-pass/fail list in the example app and writes a JSON report. Currently **iOS 21/0 (1 skip),
-Android 22/0**.
+pass/fail list in the example app and writes a JSON report. Currently **iOS 27/0 (1 skip),
+Android 28/0**.
 
 ```bash
 cd example && npx react-native start &                       # Metro must be running
@@ -142,15 +143,40 @@ written, because that function already spreads the whole options object through 
 the return *type*, which jest cannot see. Type-level gaps need `tsc` as the failing gate; jest
 will happily green-light them.
 
+## Streaming
+
+The API is now exercised on device. One defect fell out of the first run, iOS only:
+**`copyFileWithProgress` produced a truncated destination and still resolved successfully** —
+98,304 bytes of an expected 148,889, with every `write()` having resolved.
+
+`writeToStream` does not write. It yields the chunk into an `AsyncStream` that a background
+task drains (`ios/Fs2Stream.swift:378-398`), so `await write()` means *accepted*, not
+*persisted*. `closeWriteStream` then cancelled that task and closed the file handle without
+draining, discarding everything still queued. `endWriteStream` had always awaited the task;
+close now does the same (`ios/Fs2Stream.swift:410-433`).
+
+Three things made this hard to see and are worth carrying forward:
+
+- **The unit suite cannot reach it.** Its fake native layer writes synchronously, so accepted
+  and persisted are the same event there. Only a real async writer separates them.
+- **Android passes the identical JS.** When one platform fails a shared-code check, the bug is
+  almost certainly native. That comparison localised this in one run.
+- **`writeStream()` passes and `copyFileWithProgress` does not**, because the former calls
+  `end()` and the latter `close()`. Two lifecycle methods that callers reasonably treat as
+  interchangeable were not.
+
+The same close-discards-queued-writes shape exists in principle on Android — `writeToStream`
+there also enqueues (`Fs2Stream.kt:403-427`) — but its close path drains, and the check passes.
+
 ## What is left
 
 **Untested on device — in priority order**
 
-1. **The streaming API.** The largest dark surface. `example5.tsx` drives it by hand;
-   `readStream`, `writeStream`, `copyFileWithProgress`, `processFileInChunks` and the
-   back-pressure/ordering fix from the earlier review have never run against real native. Given
-   the hit rate above, expect this to find something. Extending `verify.ts` is the cheap path —
-   it is a pure JS addition that runs on next launch.
+1. ~~The streaming API.~~ **Done** — six checks in `verify.ts` cover `readStream` (multi-chunk,
+   utf8 across a chunk boundary, empty file), `writeStream`, `copyFileWithProgress` and
+   `processFileInChunks`. It found one defect on the first run; see "Streaming" below. Still
+   uncovered there: `start`/`end` range reads, an explicitly `pause`d stream driven by hand, and
+   any error path (a read stream over a deleted file, a write to a full disk).
 2. `stopDownload` mid-flight, and the resumable / `canBeResumed` path. `stopDownload` matters
    because it is the fallback branch in the new `downloadFile` wrapper, so it is the
    least-exercised code written this session.
