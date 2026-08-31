@@ -310,13 +310,15 @@ class Fs2Stream: HybridFs2StreamSpec {
         throw StreamError.invalidStream(streamId: streamId)
       }
       if !state.isActive { return }
+
+      // Setting the flag is the whole operation. This used to also finish the continuation and
+      // install a fresh AsyncStream, which broke both directions of the handshake: the read
+      // loop could capture the stream that had just been finished - `for await` over a finished
+      // stream returns immediately, so the pause silently became a no-op - and a later
+      // `resume()` could yield into a continuation nobody was awaiting, losing the wakeup and
+      // hanging the reader. One stream per read stream, created in `startReadStream` and
+      // finished in `closeReadStream`, keeps both ends talking to the same object.
       state.isPaused = true
-      // Finish the old continuation to prevent memory leak
-      state.pauseStreamContinuation?.finish()
-      // Pause by setting up a new pauseStream
-      let (pauseStream, pauseContinuation) = AsyncStream<Void>.makeStream()
-      state.pauseStream = pauseStream
-      state.pauseStreamContinuation = pauseContinuation
     }
   }
 
@@ -349,6 +351,10 @@ class Fs2Stream: HybridFs2StreamSpec {
 
       // Cancel and wait for task to finish before closing file handle
       state.isActive = false
+      // Unblocks a reader parked in the pause handshake. Task cancellation alone would
+      // usually end the `for await`, but finishing the stream makes it deterministic.
+      state.isPaused = false
+      state.pauseStreamContinuation?.finish()
       state.task?.cancel()
       if let task = state.task {
         _ = await task.result
