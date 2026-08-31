@@ -84,22 +84,7 @@ is caught by the compiler rather than silently misreading it. A missing `ctime` 
 | `write` | `write(filepath, contents, position?, encodingOrOptions?): Promise<null>` | `write(filepath, contents, position?, encodingOrOptions?): Promise<void>` | 🔁 Declared return type only. Master declared `Promise<null>` but resolved `undefined`; 4.x declares what it does. `position` still defaults to append: master coerced `undefined` to `-1` in JS, 4.x passes `undefined` and both natives treat a missing/negative position as "seek to end" (`ios/Fs2.swift:590-593`; `Fs2.kt:278` → `RNFSManager.kt:133`). |
 | `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | ⚠️ Same signature, changed result shape — see `StatResult` in section 7 and the timestamps subsection above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). |
 | `hash` | `hash(filepath: string, algorithm: string): Promise<string>` | `hash(filepath: string, algorithm: HashAlgorithm): Promise<string>` | ⚠️ `algorithm` narrowed from `string` to the `HashAlgorithm` union, so an unsupported name is now a compile error instead of a runtime rejection. All six 3.x algorithms are supported: `sha224` was briefly dropped from the union and both generated enums, and has been restored on this branch (`src/nitro/Fs2.nitro.ts:76-82`, `ios/Fs2.swift:324-326`; Kotlin needed no change - `RNFSManager.kt:184` already mapped it). `HashAlgorithm` is exported from the package root, so you can name the parameter type. |
-| `touch` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | 💥 **on Android — see the defect note below.** Public signature unchanged, still takes `Date`. Master gated `ctime` behind a JS-side `Platform.OS === 'ios'` check (`master:src/index.ts:357-358`); 4.x passes both through and lets native decide. Android still only applies `mtime` (`Fs2.kt:312-315`). |
-
-### 🐞 Known defect: `touch` is off by 1000× on Android in 4.x
-
-Not a migration difference — a live bug, recorded here because the row above otherwise reads
-as benign.
-
-`src/index.ts:217` sends `mtime.getTime()`, i.e. **milliseconds**. `Fs2.kt:315` forwards it
-unchanged. `RNFSManager.kt:449` then does `file.setLastModified(mtime * 1000)`, on the
-comment's assumption that it received seconds. The result is a modification time roughly
-1000× further from the epoch than intended.
-
-Master was correct: `master:src/index.ts` sent the same millisecond value and
-`master:RNFSManager.java:561` passed it straight to `setLastModified`, which wants
-milliseconds. iOS 4.x is also correct — it divides by 1000 (`ios/Fs2.swift:619`, `ios/Fs2.swift:624`).
-The fix is to drop the `* 1000` in `RNFSManager.kt:449`.
+| `touch` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | 🔁 Public signature unchanged — still takes `Date`. Master gated `ctime` behind a JS-side `Platform.OS === 'ios'` check (`master:src/index.ts:357-358`); 4.x passes both through and lets native decide, and Android still applies only `mtime` (`Fs2.kt:312-315`). Android briefly multiplied the incoming millisecond value by 1000, putting touched files ~30,000 years in the future; fixed on this branch (`RNFSManager.kt:453-455`). |
 
 ## 3. System information
 
@@ -369,6 +354,4 @@ grep -rn "completeHandlerIOS"     # removed, no replacement
 
 ### Open defects in 4.x, not migration differences
 
-- **`touch` on Android is off by 1000×** — `RNFSManager.kt:449` multiplies an
-  already-millisecond value by 1000. See section 2.
 - **iOS background downloads are unusable** without `completeHandlerIOS`. See section 4.

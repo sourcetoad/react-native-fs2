@@ -441,11 +441,17 @@ class RNFSManager(private val context: ReactApplicationContext) {
         }
     }
 
-    fun touch(filepath: String, mtime: Long, ctime: Long? = null): Boolean {
-        // Java File API only supports setting lastModified time (mtime).
-        // ctime (creation time or change time) is not directly settable.
-        // We'll use mtime for lastModified.
+    /**
+     * [mtimeMs] is milliseconds since the epoch, which is what `Date.getTime()` produces in JS
+     * and what `setLastModified` expects - so it is passed straight through. An earlier version
+     * multiplied by 1000 on the assumption that it received seconds, which put every touched
+     * file roughly 30,000 years into the future.
+     *
+     * The Java File API can only set lastModified, so [ctime] is accepted and ignored; iOS
+     * applies it.
+     */
+    fun touch(filepath: String, mtimeMs: Long, ctime: Long? = null): Boolean {
         val file = File(getOriginalFilepath(filepath, false)) // Use original path
-        return file.setLastModified(mtime * 1000) // Original was in seconds, convert to ms
+        return file.setLastModified(mtimeMs)
     }
 }
