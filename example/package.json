@@ -12,7 +12,8 @@
   "dependencies": {
     "react": "19.2.8",
     "react-native": "0.87.1",
-    "react-native-nitro-modules": "^0.37.0"
+    "react-native-nitro-modules": "^0.37.0",
+    "react-native-safe-area-context": "^5.9.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

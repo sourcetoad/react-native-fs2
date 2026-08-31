@@ -4,11 +4,11 @@ import {
   BackHandler,
   PermissionsAndroid,
   Platform,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getTestFolder, requestAndroidPermission } from './utils';
 import { runVerification, type Report } from './verify';
@@ -17,19 +17,6 @@ import { ENTRIES, type EntryKey } from './entries';
 import ExampleList from './screens/ExampleList';
 import Screen from './screens/Screen';
 import VerifyScreen from './screens/VerifyScreen';
-
-/**
- * React Native's own `SafeAreaView` is a no-op on Android, which left the header colliding
- * with the status bar clock and the Clean button sitting under the signal icons. Android 15
- * (API 35) draws edge-to-edge by default, so the inset has to be applied explicitly.
- *
- * `react-native-safe-area-context` would be the better tool and also covers the bottom
- * gesture bar, but adding it makes the library module's codegen emit
- * `RNCSafeAreaProviderManagerDelegate` a second time and the Android build fails on duplicate
- * dex classes. That is worth fixing on its own; it should not be fixed inside a UI change.
- */
-const androidStatusBar =
-  Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
 
 const App = () => {
   // Which entry is open. `null` is the list.
@@ -117,7 +104,10 @@ const App = () => {
 
   return (
     <BusyContext.Provider value={setBusy}>
-      <SafeAreaView style={[styles.safeArea, { paddingTop: androidStatusBar }]}>
+      <SafeAreaView
+        style={styles.safeArea}
+        edges={['top', 'bottom', 'left', 'right']}
+      >
         <StatusBar barStyle="dark-content" />
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
@@ -161,4 +151,17 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#fff' },
 });
 
-export default App;
+/**
+ * `SafeAreaProvider` must sit above anything reading insets. React Native's own `SafeAreaView`
+ * is iOS-only, so on Android the header collided with the status bar clock and the Clean
+ * button sat under the signal icons; Android 15 (API 35) draws edge-to-edge by default, which
+ * a hand-rolled `StatusBar.currentHeight` padding handles badly and does not cover the bottom
+ * gesture bar at all.
+ */
+const Root = () => (
+  <SafeAreaProvider>
+    <App />
+  </SafeAreaProvider>
+);
+
+export default Root;
