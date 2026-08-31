@@ -124,6 +124,8 @@ Also recursively deletes directories (works like Linux `rm -rf`).
 await RNFS.exists('File')
 ```
 * Check if the item exists at `filepath`. If the item does not exist, return false.
+* (Android) `content://` URIs are resolved to the underlying file, so a content URI that
+  points at a real file now returns `true`. In 3.x it always returned `false`.
 
 ### `readDir`
 ```ts

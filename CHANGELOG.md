@@ -6,6 +6,7 @@
  * Native `ArrayBuffer` support for reads and writes; no extra dependencies required.
  * Android modules rewritten in Kotlin; iOS in Swift.
  * Ports [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs.
+ * (Android) `exists()` and `unlink()` now resolve `content://` URIs to the underlying file. In 3.x they operated on the raw string, so a content URI never existed and could not be unlinked.
  * Requires `react-native-nitro-modules` and React Native >= 0.82.
 
 # v3.4.2 (March 9, 2026)
