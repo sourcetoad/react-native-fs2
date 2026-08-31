@@ -181,11 +181,9 @@ class Fs2: HybridFs2Spec {
       let path = Self.normalizePath(filepath)
       
       guard fileManager.fileExists(atPath: path) else {
-        // File doesn't exist, so it's already "unlinked" in a sense.
-        // Original library didn't throw an error here, so we won't either.
-        // However, if it's a directory and not empty, removeItemAtPath would fail.
-        // For consistency with original, we don't check for directory emptiness here.
-        return
+        // 3.x rejected ENOENT here (master:ios/RNFSManager.m:213-214), and Android rejects
+        // ENOENT too, so resolving would leave the two platforms disagreeing on the same call.
+        throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(path)'")
       }
       
       do {
