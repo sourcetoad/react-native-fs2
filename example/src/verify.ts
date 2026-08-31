@@ -9,7 +9,7 @@
  * Every check names the commit it guards, so a failure points straight at what regressed.
  */
 import { Platform } from 'react-native';
-import RNFS from 'react-native-fs2';
+import RNFS, { MediaStore } from 'react-native-fs2';
 
 export type Check = {
   name: string;
@@ -78,7 +78,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
-/** Rejects unless `fn` throws a message starting with `code`. */
+/**
+ * Rejects unless `fn` throws a message *starting* with `code`.
+ *
+ * `startsWith` rather than `includes` on purpose - it is the documented contract
+ * (`err.message.startsWith('ENOENT')`), and only the strict form catches a message that has
+ * been prefixed on its way to JS. Nitro prepends the method name to anything thrown
+ * synchronously out of a `throws -> Promise<T>`, which is how the iOS MediaStore stubs used
+ * to arrive as `MediaStore.mediaStoreQueryFile(...): ENOTSUP: ...`.
+ */
 async function expectRejection(fn: () => Promise<unknown>, code: string) {
   let message: string | undefined;
   try {
@@ -88,8 +96,8 @@ async function expectRejection(fn: () => Promise<unknown>, code: string) {
   }
   assert(message !== undefined, `expected a rejection, but it resolved`);
   assert(
-    message!.includes(code),
-    `expected the message to contain "${code}", got: ${message}`
+    message!.startsWith(code),
+    `expected the message to start with "${code}", got: ${message}`
   );
   return message!;
 }
@@ -437,6 +445,92 @@ export async function runVerification(): Promise<Report> {
       return `rejected as expected (error callback fired: ${errorEventFired})`;
     }
   );
+
+  // --- Android MediaStore -----------------------------------------------------------------
+  // The whole namespace was untested until now. The stat check below is the one that matters:
+  // `statContentUri` only looked for DocumentsContract's "last_modified" column, which
+  // MediaStore does not have, so every content:// stat reported mtime 0 (1970).
+  if (Platform.OS === 'android') {
+    await check(
+      'MediaStore copy, query, stat and delete',
+      'mediastore-android',
+      async () => {
+        const source = `${root}/media-source.png`;
+        // A 1x1 PNG, so the entry is a genuinely decodable image rather than stray bytes.
+        const PNG_1PX_BASE64 =
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        await RNFS.writeFile(source, PNG_1PX_BASE64, 'base64');
+
+        const fileName = `rnfs2-verify-${Date.now()}.png`;
+        const uri = await MediaStore.copyToMediaStore(
+          {
+            name: fileName,
+            parentFolder: 'RNFS2Verify',
+            mimeType: 'image/png',
+          },
+          MediaStore.MEDIA_IMAGE,
+          source
+        );
+        assert(
+          typeof uri === 'string' && uri.startsWith('content://'),
+          `copyToMediaStore returned ${uri}`
+        );
+
+        const found = await MediaStore.queryMediaStore({
+          fileName,
+          relativePath: 'RNFS2Verify',
+          mediaType: MediaStore.MEDIA_IMAGE,
+        });
+        assert(
+          found !== undefined,
+          'queryMediaStore did not find the entry it just created'
+        );
+        assert(
+          found!.uri === uri,
+          `query returned ${found!.uri}, created ${uri}`
+        );
+
+        // The bug this guards: a content:// stat with mtime 0.
+        const stat = await RNFS.stat(uri);
+        assert(stat.size > 0, `stat reported size ${stat.size}`);
+        assert(
+          stat.mtime > 0,
+          `stat reported mtime ${stat.mtime}; MediaStore exposes date_modified, not ` +
+            `DocumentsContract's last_modified, so reading only the latter yields 0`
+        );
+        const skewDays = Math.abs(stat.mtime - Date.now()) / 86400000;
+        assert(
+          skewDays < 2,
+          `mtime ${new Date(stat.mtime).toISOString()} is ${skewDays.toFixed(1)} days off`
+        );
+
+        const deleted = await MediaStore.deleteFromMediaStore(uri);
+        assert(deleted, 'deleteFromMediaStore returned false');
+
+        const afterDelete = await MediaStore.queryMediaStore({
+          fileName,
+          relativePath: 'RNFS2Verify',
+          mediaType: MediaStore.MEDIA_IMAGE,
+        });
+        assert(
+          afterDelete === undefined,
+          'query still found the entry after it was deleted'
+        );
+
+        return (
+          `uri=${uri} size=${stat.size} ` +
+          `mtime=${new Date(stat.mtime).toISOString()} ctime=${new Date(stat.ctime).toISOString()}`
+        );
+      }
+    );
+  } else {
+    await check('MediaStore rejects ENOTSUP on iOS', 'mediastore-android', () =>
+      expectRejection(
+        () => MediaStore.queryMediaStore({ mediaType: 'Image' }),
+        'ENOTSUP'
+      )
+    );
+  }
 
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
