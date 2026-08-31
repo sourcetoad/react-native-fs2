@@ -55,6 +55,29 @@ function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * The Metro dev server, not a public host. An external URL makes this check test someone
+ * else's uptime - picsum rate-limited and then timed out across repeated runs - when what is
+ * under test is our own promise/event plumbing. Metro is by definition running whenever this
+ * app is, serves a tiny body on /status, and is reachable from both platforms: localhost on
+ * the iOS simulator, and on Android through the `adb reverse tcp:8081 tcp:8081` the RN CLI
+ * already sets up for the bundle.
+ */
+const DOWNLOAD_URL = 'http://localhost:8081/status';
+
+/** Keeps a hung network call from stalling the whole run. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms
+      )
+    ),
+  ]);
+}
+
 /** Rejects unless `fn` throws a message starting with `code`. */
 async function expectRejection(fn: () => Promise<unknown>, code: string) {
   let message: string | undefined;
@@ -316,6 +339,102 @@ export async function runVerification(): Promise<Report> {
         `arraybuffer encoding returned ${typeof buffer}`
       );
       return `utf8 round-tripped, arraybuffer gave ${(buffer as ArrayBuffer).byteLength} bytes`;
+    }
+  );
+
+  // --- downloadFile resolves DownloadResult, not a bare jobId ---------------------------
+  // Guards: "fix: resolve DownloadResult from downloadFile instead of a bare jobId". The
+  // Nitro method resolves the jobId alone and sends status/bytes over the complete event; the
+  // wrapper reassembles the 3.x shape. Typed `Promise<any>` before, so the regression compiled
+  // and ran silently - only awaiting a real download shows it.
+  await check(
+    'downloadFile() resolves DownloadResult',
+    'download-result',
+    async () => {
+      const dest = `${root}/downloaded.jpg`;
+      const seen = { begin: false, progress: false, complete: false };
+
+      const { jobId, promise } = RNFS.downloadFile({
+        fromUrl: DOWNLOAD_URL,
+        toFile: dest,
+        begin: () => {
+          seen.begin = true;
+        },
+        progress: () => {
+          seen.progress = true;
+        },
+        complete: () => {
+          seen.complete = true;
+        },
+      });
+
+      const result: any = await withTimeout(promise, 45000, 'download');
+
+      assert(
+        typeof result === 'object' && result !== null,
+        `resolved ${typeof result} (${result}) instead of an object - ` +
+          `this is the bare-jobId regression`
+      );
+      assert(
+        result.jobId === jobId,
+        `resolved jobId ${result.jobId}, expected ${jobId}`
+      );
+      // Assert the field is *populated*, not that it equals 200 - the remote host's mood is
+      // not under test. `undefined` here is the regression: it means the wrapper never saw
+      // the complete event and fell back to the bare jobId.
+      assert(
+        typeof result.statusCode === 'number',
+        `statusCode was ${result.statusCode}; the complete event was not captured`
+      );
+      assert(
+        typeof result.bytesWritten === 'number' && result.bytesWritten > 0,
+        `bytesWritten was ${result.bytesWritten}`
+      );
+      assert(seen.complete, 'the complete callback never fired');
+      // `begin` and `progress` are deliberately NOT asserted. Both fire only once the
+      // transfer size is known - iOS gates them on `totalBytesExpectedToWrite > 0`
+      // (ios/Downloader.swift:148) - so a chunked response with no Content-Length, which is
+      // what Metro sends, legitimately produces neither. Asserting them would test the
+      // server's framing rather than this library. They are reported below instead.
+
+      const stat = await RNFS.stat(dest);
+      assert(
+        stat.size === result.bytesWritten,
+        `file is ${stat.size} bytes but bytesWritten said ${result.bytesWritten}`
+      );
+
+      return (
+        `jobId=${result.jobId} statusCode=${result.statusCode}` +
+        `${result.statusCode === 200 ? '' : ' (remote host said so, not our code)'} ` +
+        `bytesWritten=${result.bytesWritten} onDisk=${stat.size} ` +
+        `callbacks(begin/progress/complete)=${seen.begin}/${seen.progress}/${seen.complete}`
+      );
+    }
+  );
+
+  // A failed download must reject the promise and fire the error callback, rather than
+  // resolving a result object with empty fields.
+  await check(
+    'downloadFile() rejects on a bad host',
+    'download-error',
+    async () => {
+      let errorEventFired = false;
+      const { promise } = RNFS.downloadFile({
+        fromUrl: 'https://this-host-does-not-exist.invalid/a.bin',
+        toFile: `${root}/never.bin`,
+        error: () => {
+          errorEventFired = true;
+        },
+      });
+
+      let rejected = false;
+      try {
+        await withTimeout(promise, 45000, 'failing download');
+      } catch {
+        rejected = true;
+      }
+      assert(rejected, 'the promise resolved for an unreachable host');
+      return `rejected as expected (error callback fired: ${errorEventFired})`;
     }
   );
 
