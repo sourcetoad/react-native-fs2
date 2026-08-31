@@ -184,7 +184,7 @@ were absent from the constants map entirely and read back as `undefined`.
 | `DownloadDirectoryPath` | **`undefined`** | path | `''` | path |
 | `ExternalDirectoryPath` | **`null`** (`NSNull`) | path or **`null`** | `''` | path or `''` |
 | `ExternalStorageDirectoryPath` | **`null`** (`NSNull`) | path or **`null`** | `''` | path or `''` |
-| `PicturesDirectoryPath` | **`undefined`** | path | ⚠️ **a real path** | path |
+| `PicturesDirectoryPath` | **`undefined`** | path | `''` | path |
 
 Android's `null`s come from the explicit else-branches at `master:RNFSManager.java:642-661`;
 4.x replaces them with `''` via `?: ""` (`Fs2.kt:40-54`).
@@ -196,11 +196,10 @@ Three things to take from that table:
   them as `string`. Strictly an improvement; it can only turn errors into non-errors.
 - **Unavailable constants are now `''`.** `''` is falsy, so `if (RNFS.ExternalStorageDirectoryPath)`
   behaves the same, but `=== null` and `=== undefined` no longer match. ⚠️ Grep for those.
-- 💥 **`PicturesDirectoryPath` on iOS is the exception, and it goes the wrong way.** It was
-  `undefined` on 3.x iOS; 4.x returns `FileManager.default.urls(for: .picturesDirectory, …)`
-  (`ios/Fs2.swift:42`), a **non-empty** path to a sandbox location that does not exist. Every
-  falsy-guard that used to skip this constant on iOS now passes, and the path fails later at
-  the filesystem call instead of at the guard.
+- **The rule is uniform.** `PicturesDirectoryPath` on iOS briefly returned a real
+  `.picturesDirectory` path — truthy, but pointing at a sandbox location that does not exist,
+  so every falsy-guard that used to skip it started passing and failing later at the
+  filesystem call. It is `''` like the rest (`ios/Fs2.swift:11-16`).
 
 ## 7. Types
 

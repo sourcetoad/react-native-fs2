@@ -542,12 +542,27 @@ type MediaStoreFile = {
  * `ExternalDirectoryPath` - Absolute path to external shared directory.
  * `ExternalStorageDirectoryPath` - Absolute path to the external shared storage directory.
  * `DownloadDirectoryPath` - Absolute path to the download directory.
+ * `PicturesDirectoryPath` - Absolute path to the shared pictures directory.
 
 > Please be sure to request needed permissions via [PermissionsAndroid](https://reactnative.dev/docs/permissionsandroid).
 
 #### iOS
  * `LibraryDirectoryPath` - Absolute path to [NSLibraryDirectory](https://developer.apple.com/documentation/foundation/nssearchpathdirectory/nslibrarydirectory)
  * `MainBundlePath` - Absolute path to main bundle directory.
+
+#### On the platform where a constant does not apply
+
+Every constant is a `string` and is `''` on the platform that does not provide it. In 3.x these
+were a mix of `null` (Android's external paths) and `undefined` (keys missing from the native
+map entirely), so a `=== null` or `=== undefined` check needs updating:
+
+```typescript
+// v3.x
+if (RNFS.ExternalStorageDirectoryPath !== null) { }
+
+// v4.x — '' is falsy, so a plain truthiness check works on both
+if (RNFS.ExternalStorageDirectoryPath) { }
+```
 
 ## Migrating from v3.x to v4.x
 

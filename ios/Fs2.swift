@@ -8,7 +8,12 @@ class Fs2: HybridFs2Spec {
   public let temporaryDirectoryPath: String
   public let libraryDirectoryPath: String
   public let mainBundlePath: String
-  public let picturesDirectoryPath: String
+  // Empty on iOS, like every other constant that does not apply to the platform. iOS defines a
+  // .picturesDirectory search path, but nothing in the app sandbox uses it and the directory
+  // does not exist - returning it would be truthy and unusable, so `if (RNFS.PicturesDirectoryPath)`
+  // would pass and then fail at the filesystem call. 3.x omitted the key entirely
+  // (master:ios/RNFSManager.m:682-696), making it `undefined` and therefore falsy.
+  public let picturesDirectoryPath: String = ""
   public let externalCachesDirectoryPath: String = ""
   public let downloadDirectoryPath: String = ""
   public let externalDirectoryPath: String = ""
@@ -39,7 +44,6 @@ class Fs2: HybridFs2Spec {
     self.documentDirectoryPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.path ?? ""
     self.temporaryDirectoryPath = NSTemporaryDirectory()
     self.libraryDirectoryPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.path ?? ""
-    self.picturesDirectoryPath = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first?.path ?? ""
     self.mainBundlePath = Bundle.main.bundlePath
     super.init()
     self.downloader.delegate = self
