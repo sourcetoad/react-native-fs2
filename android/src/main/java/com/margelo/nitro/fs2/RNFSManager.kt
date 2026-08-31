@@ -381,8 +381,10 @@ class RNFSManager(private val context: ReactApplicationContext) {
     data class FSInfo(
         val totalSpace: Long, // Internal storage total space
         val freeSpace: Long, // Internal storage free space
-        val totalSpaceEx: Long, // External storage total space (if available)
-        val freeSpaceEx: Long // External storage free space (if available)
+        // External storage, null when no volume is mounted or StatFs could not read it.
+        // Null rather than 0 so callers can tell "no external storage" from "a full volume".
+        val totalSpaceEx: Long?,
+        val freeSpaceEx: Long?
     )
 
     // For StatFs methods
@@ -392,8 +394,8 @@ class RNFSManager(private val context: ReactApplicationContext) {
         val totalSpace = stat.totalBytes
         val freeSpace = stat.freeBytes
 
-        var totalSpaceEx = 0L
-        var freeSpaceEx = 0L
+        var totalSpaceEx: Long? = null
+        var freeSpaceEx: Long? = null
 
         if (Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED) {
             try {

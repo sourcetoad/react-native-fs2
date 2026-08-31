@@ -332,12 +332,14 @@ class Fs2() : HybridFs2Spec() {
         return Promise.async {
             try {
                 val fsInfo = rnfsManager.getFSInfo()
-                // Map internal storage info to FSInfoResult.
-                // External storage info (fsInfo.totalSpaceEx, fsInfo.freeSpaceEx) is available
-                // if we decide to expand FSInfoResult in Fs2.nitro.ts later.
+                // 3.x resolved all four of these on Android (master:RNFSManager.java:549-554)
+                // even though FSInfoResult only declared the first two. The external pair stays
+                // null when no volume is mounted; iOS never reports them at all.
                 return@async FSInfoResult(
                     totalSpace = fsInfo.totalSpace.toDouble(),
-                    freeSpace = fsInfo.freeSpace.toDouble()
+                    freeSpace = fsInfo.freeSpace.toDouble(),
+                    totalSpaceEx = fsInfo.totalSpaceEx?.toDouble(),
+                    freeSpaceEx = fsInfo.freeSpaceEx?.toDouble()
                 )
             } catch (e: Exception) {
                 // Although rnfsManager.getFSInfo() doesn't declare throwing specific exceptions,

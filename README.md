@@ -100,8 +100,11 @@ const fsInfo = await RNFS.getFSInfo()
 ```
 * Returns an `FSInfoResult` object that contains information on the device storage space
 * `FSInfoResult`
-  * totalSpace: `number` -> The total amount of storage space on the device (in bytes).
-  * freeSpace: `number` -> The amount of available storage space on the device (in bytes)
+  * totalSpace: `number` -> Total internal storage on the device (in bytes).
+  * freeSpace: `number` -> Available internal storage on the device (in bytes).
+  * totalSpaceEx: `number | undefined` -> (Android) Total external storage, in bytes.
+    `undefined` on iOS and when no external volume is mounted.
+  * freeSpaceEx: `number | undefined` -> (Android) Available external storage, in bytes.
 
 ### `getAllExternalFilesDirs` (Android only)
 ```ts

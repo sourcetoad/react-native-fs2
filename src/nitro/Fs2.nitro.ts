@@ -41,8 +41,12 @@ export interface MkdirOptions {
 
 // For getFSInfo
 export interface FSInfoResult {
-  totalSpace: number; // in bytes
-  freeSpace: number; // in bytes
+  totalSpace: number; // Internal storage, in bytes
+  freeSpace: number; // Internal storage, in bytes
+  // External storage. Android only - undefined on iOS, and on Android when no external volume
+  // is mounted. 3.x returned these on Android without declaring them (master:RNFSManager.java:549-554).
+  totalSpaceEx?: number; // in bytes
+  freeSpaceEx?: number; // in bytes
 }
 
 // For downloadFile

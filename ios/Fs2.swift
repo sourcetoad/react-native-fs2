@@ -499,7 +499,14 @@ class Fs2: HybridFs2Spec {
           throw RuntimeError.error(withMessage: "EATTR: Could not retrieve file system size attributes.")
         }
         
-        return FSInfoResult(totalSpace: total.doubleValue, freeSpace: free.doubleValue)
+        // totalSpaceEx/freeSpaceEx describe Android external storage and have no iOS
+        // equivalent - the sandbox sits on the one volume already reported above.
+        return FSInfoResult(
+          totalSpace: total.doubleValue,
+          freeSpace: free.doubleValue,
+          totalSpaceEx: nil,
+          freeSpaceEx: nil
+        )
       } catch {
         throw RuntimeError.error(withMessage: "EFSINFO: Failed to get file system info: \(error.localizedDescription)")
       }
