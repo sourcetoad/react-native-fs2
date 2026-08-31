@@ -12,8 +12,13 @@ import { Platform } from 'react-native';
 import RNFS, {
   MediaStore,
   copyFileWithProgress,
+  createReadStream,
+  createWriteStream,
+  listenToReadStreamData,
+  listenToReadStreamEnd,
   processFileInChunks,
   readStream,
+  stringToArrayBuffer,
   writeStream,
 } from 'react-native-fs2';
 
@@ -60,6 +65,9 @@ async function skip(name: string, guards: string, why: string) {
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
 }
+
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * The Metro dev server, not a public host. An external URL makes this check test someone
@@ -764,6 +772,335 @@ export async function runVerification(): Promise<Report> {
     assert(back === '', `expected empty string, got ${JSON.stringify(back)}`);
     return 'resolved empty rather than hanging';
   });
+
+  // --- Streaming, round two -----------------------------------------------------------------
+  // The first pass covered the happy paths of the four high-level helpers. These cover the
+  // low-level handle API underneath them: range reads, pause/resume, append, position, and
+  // what happens when the file is not there.
+
+  await check(
+    'createReadStream() honours start and end',
+    'streaming-range',
+    async () => {
+      const file = `${root}/stream-range.txt`;
+      // Index-bearing content, so a wrong offset is visible rather than plausible.
+      const payload = Array.from({ length: 256 }, (_, i) =>
+        String(i % 10)
+      ).join('');
+      await RNFS.writeFile(file, payload, 'utf8');
+
+      const stream = await createReadStream(file, { start: 10, end: 19 });
+      const parts: ArrayBuffer[] = [];
+      const done = new Promise<void>((resolve) => {
+        listenToReadStreamData(stream.streamId, (e) => parts.push(e.data));
+        listenToReadStreamEnd(stream.streamId, () => resolve());
+      });
+      await stream.start();
+      await withTimeout(done, 10000, 'range read');
+
+      const total = parts.reduce((n, p) => n + p.byteLength, 0);
+      const text = String.fromCharCode(
+        ...new Uint8Array(
+          parts.reduce<number[]>(
+            (acc, p) => acc.concat(Array.from(new Uint8Array(p))),
+            []
+          )
+        )
+      );
+      // `end` is inclusive on both platforms, so 10..19 is ten bytes.
+      assert(
+        total === 10,
+        `read ${total} bytes, expected 10 for start:10 end:19`
+      );
+      assert(
+        text === payload.slice(10, 20),
+        `got ${JSON.stringify(text)}, expected ${JSON.stringify(payload.slice(10, 20))}`
+      );
+      return `start:10 end:19 gave exactly ${JSON.stringify(text)}`;
+    }
+  );
+
+  // The one aimed at a real suspicion. iOS `pauseReadStream` finishes the old AsyncStream
+  // continuation and installs a new one, so the read loop can capture a stream that is already
+  // finished - `for await` over which returns immediately, making pause a no-op. If that
+  // happens the stream runs to completion instead of holding, which is what this detects.
+  //
+  // Records a skip rather than a pass when the file drains before pause lands: a stream that
+  // has already ended is stable for the same reason a paused one is, and calling that a pass
+  // would be a false green.
+  {
+    const name = 'pause() actually halts the read loop';
+    const guards = 'streaming-pause';
+    try {
+      const file = `${root}/stream-pause.txt`;
+      // Many small chunks, so the reader has plenty left to do when the pause lands.
+      const payload = 'p'.repeat(4 * 1024 * 1024);
+      await RNFS.writeFile(file, payload, 'utf8');
+      const totalChunks = Math.ceil(payload.length / 1024);
+
+      const stream = await createReadStream(file, { bufferSize: 1024 });
+      let chunks = 0;
+      let ended = false;
+      let pausePromise: Promise<void> | null = null;
+      // Distinguishes "the reader outran the pause" from "JS never got a turn until the read
+      // had already finished" - the latter would mean back-pressure cannot work at all here.
+      let chunksAtPauseCall = 0;
+      let chunksAtPauseResolved = 0;
+
+      listenToReadStreamData(stream.streamId, () => {
+        chunks += 1;
+        if (chunks === 1 && !pausePromise) {
+          chunksAtPauseCall = chunks;
+          pausePromise = stream.pause();
+        }
+      });
+      listenToReadStreamEnd(stream.streamId, () => {
+        ended = true;
+      });
+
+      await stream.start();
+      // Wait for the first chunk to trigger the pause call.
+      for (let i = 0; i < 100 && !pausePromise; i++) await delay(10);
+      if (pausePromise) await pausePromise;
+      chunksAtPauseResolved = chunks;
+
+      await delay(300);
+      const settled = chunks;
+      await delay(400);
+
+      if (ended) {
+        record(
+          name,
+          guards,
+          'skip',
+          `stream reached the end (${chunks}/${totalChunks} chunks) before pause could be ` +
+            `observed. pause() was called at chunk ${chunksAtPauseCall} and resolved at ` +
+            `chunk ${chunksAtPauseResolved}. If those are 1 and ${totalChunks}, JS never got ` +
+            `a turn until the read had finished, and back-pressure cannot engage here at all`
+        );
+      } else {
+        assert(
+          chunks === settled,
+          `chunk count moved from ${settled} to ${chunks} while paused`
+        );
+        const beforeResume = chunks;
+        await stream.resume();
+        const finished = new Promise<void>((resolve) => {
+          listenToReadStreamEnd(stream.streamId, () => resolve());
+        });
+        await withTimeout(finished, 30000, 'resume');
+        assert(
+          chunks > beforeResume,
+          `resume() produced no further chunks (still ${chunks})`
+        );
+        record(
+          name,
+          guards,
+          'pass',
+          `pause() called at chunk ${chunksAtPauseCall}, resolved at ` +
+            `${chunksAtPauseResolved}; held at ${settled}/${totalChunks} while paused, ` +
+            `ran on to ${chunks} after resume`
+        );
+      }
+    } catch (e: any) {
+      record(name, guards, 'fail', e?.message ?? String(e));
+    }
+  }
+
+  await check(
+    'createWriteStream() appends when asked',
+    'streaming-append',
+    async () => {
+      const file = `${root}/stream-append.txt`;
+      await RNFS.writeFile(file, 'first;', 'utf8');
+
+      const stream = await createWriteStream(file, { append: true });
+      await stream.write(stringToArrayBuffer('second', 'utf8'));
+      // `end()` is documented as an alias for `close()` (docs/FILE_STREAM.md:227-228), so
+      // exactly one of them terminates the stream. Calling the second reports ENOENT, which
+      // is why `_filestream.ts` wraps its own cleanup in `closeQuietly`.
+      await stream.end();
+
+      const back = await readText(file);
+      assert(
+        back === 'first;second',
+        `append gave ${JSON.stringify(back)}, expected "first;second"`
+      );
+      return 'appended rather than truncated';
+    }
+  );
+
+  await check(
+    'write stream getPosition() tracks bytes written',
+    'streaming-position',
+    async () => {
+      const file = `${root}/stream-position.txt`;
+      const stream = await createWriteStream(file);
+      await stream.write(stringToArrayBuffer('0123456789', 'utf8'));
+
+      // Before terminating: `end()` drains and drops the registry entry, after which the
+      // handle no longer resolves.
+      const position = await stream.getPosition();
+      await stream.end();
+
+      assert(
+        position === 10,
+        `getPosition() reported ${position} after writing 10 bytes`
+      );
+      assert(
+        typeof position === 'number',
+        `getPosition() returned ${typeof position}, not a number - a bigint leaked through`
+      );
+      return `position ${position} after 10 bytes`;
+    }
+  );
+
+  await check(
+    'readStream() rejects for a missing file',
+    'streaming-errors',
+    async () => {
+      let rejected = false;
+      let message = '';
+      try {
+        await readStream(`${root}/definitely-not-here.txt`, 'utf8');
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'resolved for a file that does not exist');
+      return `rejected: ${message.slice(0, 80)}`;
+    }
+  );
+
+  // --- stopDownload -------------------------------------------------------------------------
+  // The least-exercised code on the branch: it is the fallback branch of the new downloadFile
+  // wrapper, where the `complete` event never arrives and the promise has to settle anyway.
+  //
+  // Deliberately does NOT assert that the transfer was cut short. Metro serves the bundle from
+  // memory over loopback, so whether stopDownload lands mid-flight is a race against the host's
+  // disk and network - asserting on it would be asserting on the peer, which has produced two
+  // false failures on this branch already. What must hold either way is that the promise
+  // settles rather than hanging forever.
+  await check(
+    'stopDownload() settles an in-flight download',
+    'stop-download',
+    async () => {
+      // The JS bundle, not /status: several MB rather than a few bytes, so there is usually
+      // something in flight to stop.
+      const url = `http://localhost:8081/index.bundle?platform=${Platform.OS}&dev=true&minify=false`;
+      const dest = `${root}/stopped.bundle`;
+
+      const { jobId, promise } = RNFS.downloadFile({
+        fromUrl: url,
+        toFile: dest,
+      });
+
+      // Long enough for the request to be issued, short enough to usually beat 4 MB.
+      await delay(50);
+      await RNFS.stopDownload(jobId);
+
+      let outcome: string;
+      try {
+        const result = await withTimeout(promise, 30000, 'stopped download');
+        outcome = `resolved (statusCode=${result.statusCode}, bytes=${result.bytesWritten})`;
+      } catch (e: any) {
+        outcome = `rejected: ${(e?.message ?? String(e)).slice(0, 60)}`;
+      }
+
+      assert(
+        !outcome.includes('timed out'),
+        'the promise never settled after stopDownload - the wrapper hung'
+      );
+      return `jobId ${jobId} ${outcome}`;
+    }
+  );
+
+  await check(
+    'stopDownload() on an unknown job does not hang',
+    'stop-download',
+    async () => {
+      let outcome = 'resolved';
+      try {
+        await withTimeout(
+          RNFS.stopDownload(999999),
+          10000,
+          'stopDownload(unknown)'
+        );
+      } catch (e: any) {
+        outcome = `rejected: ${(e?.message ?? String(e)).slice(0, 60)}`;
+        assert(
+          !outcome.includes('timed out'),
+          'stopDownload() never settled for an unknown jobId'
+        );
+      }
+      return outcome;
+    }
+  );
+
+  // --- content:// URIs in exists() and unlink() ----------------------------------------------
+  // Documented as a deliberate 4.x improvement over 3.x but never exercised. Needs a real
+  // MediaStore entry; this creates its own rather than reusing the one above, which the
+  // MediaStore check deletes.
+  if (Platform.OS === 'android') {
+    await check(
+      'exists() and unlink() resolve a content:// URI',
+      'content-uri',
+      async () => {
+        const source = `${root}/content-uri-source.png`;
+        const PNG_1PX_BASE64 =
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        await RNFS.writeFile(source, PNG_1PX_BASE64, 'base64');
+
+        const uri = await MediaStore.copyToMediaStore(
+          {
+            name: `rnfs2-content-${Date.now()}.png`,
+            parentFolder: 'RNFS2Verify',
+            mimeType: 'image/png',
+          },
+          MediaStore.MEDIA_IMAGE,
+          source
+        );
+        assert(
+          typeof uri === 'string' && uri.startsWith('content://'),
+          `copyToMediaStore returned ${uri}`
+        );
+
+        assert(
+          await RNFS.exists(uri),
+          'exists() said false for a content:// URI that had just been created'
+        );
+
+        await RNFS.unlink(uri);
+
+        assert(
+          !(await RNFS.exists(uri)),
+          'exists() still said true after unlink() removed the entry'
+        );
+        return 'created, found, unlinked and confirmed gone';
+      }
+    );
+
+    // 3.x rejected here; 4.x resolving false is the documented fix, and a missing entry must
+    // not be confused with a malformed URI.
+    await check(
+      'exists() resolves false for an absent content:// URI',
+      'content-uri',
+      async () => {
+        const absent = 'content://media/external/images/media/999999999';
+        assert(
+          !(await RNFS.exists(absent)),
+          'exists() said true for a MediaStore id that does not exist'
+        );
+        return 'resolved false rather than rejecting';
+      }
+    );
+  } else {
+    await skip(
+      'exists() and unlink() resolve a content:// URI',
+      'content-uri',
+      'Android-only; iOS has no MediaStore and no content:// scheme'
+    );
+  }
 
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
