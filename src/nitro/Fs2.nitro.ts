@@ -6,8 +6,10 @@ export interface ReadDirItem {
   size: number;
   isFile: boolean;
   isDirectory: boolean;
-  mtime: number; // timestamp
-  ctime?: number; // creation timestamp (best effort, iOS provides it, Android will use mtime)
+  // Native emits SECONDS since the epoch on both platforms. The JS wrapper in src/index.ts
+  // converts to milliseconds before these reach a caller - do not convert twice.
+  mtime: number; // seconds since epoch
+  ctime?: number; // seconds since epoch; best effort - iOS provides it, Android omits it here
 }
 
 // Define the new type for StatResult's type field
@@ -15,8 +17,9 @@ export type StatResultType = 'file' | 'directory';
 
 export interface NativeStatResult {
   mode?: number; // iOS only, UNIX file mode
-  ctime: number; // Created date
-  mtime: number; // Last modified date
+  // As above: SECONDS from native, converted to milliseconds by the wrapper.
+  ctime: number; // seconds since epoch
+  mtime: number; // seconds since epoch
   size: number; // Size in bytes
   type: StatResultType;
   originalFilepath: string;

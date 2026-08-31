@@ -26,8 +26,8 @@ export type ReadDirItem = {
   name: string; // The name of the item
   path: string; // The absolute path to the item
   size: number; // Size in bytes
-  mtime: number; // Last modified date
-  ctime?: number; // Created date (best effort; iOS provides it, Android reuses mtime)
+  mtime: number; // Last modified, ms since epoch
+  ctime?: number; // Created, ms since epoch. Best effort: iOS provides it, Android omits it here
   isFile: () => boolean; // Is the item just a file?
   isDirectory: () => boolean; // Is the item a directory?
 };
@@ -59,8 +59,8 @@ export type StatResult = {
   path: string; // The absolute path to the item
   size: number; // Size in bytes
   mode: number; // UNIX file mode
-  ctime: number; // Created date
-  mtime: number; // Last modified date
+  ctime: number; // Created, ms since epoch
+  mtime: number; // Last modified, ms since epoch
   originalFilepath: string; // In case of content uri this is the pointed file path, otherwise is the same as path
   isFile: () => boolean; // Is the file just a file?
   isDirectory: () => boolean; // Is the file a directory?

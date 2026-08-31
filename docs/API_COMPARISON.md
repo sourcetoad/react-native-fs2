@@ -42,31 +42,36 @@ reserved for changes no amount of type-checking will catch.
 | `moveFile` / `copyFile` — destination handling | iOS: **fails** if the destination exists (`copyItemAtPath`/`moveItemAtPath` with no pre-removal). Android: overwrites (`getOutputStream(dest, false)`, `master:RNFSManager.java:322`) | Both platforms **overwrite**: the destination is removed first (`ios/Fs2.swift:371-373`, `ios/Fs2.swift:423-425`) | 💥 Platform parity was fixed by making iOS match Android, so iOS callers who relied on the copy **failing** rather than clobbering an existing file now lose that file. Nothing warns you. Deliberate rather than accidental — `MIGRATION_CHECKLIST.md:19` records the target behaviour as "Handles overwrite and dest as dir". 4.x also newly resolves a directory destination by appending the source basename (`ios/Fs2.swift:356-359`, `ios/Fs2.swift:408-411`) and creates missing parent directories (`ios/Fs2.swift:363-365`) — neither is master behaviour. |
 | `unlink` | `unlink(filepath: string): Promise<void>` | `unlink(filepath: string): Promise<void>` | 🔁 **Now consistent; master's two platforms never agreed.** Master iOS rejected `ENOENT` for a missing path (`master:ios/RNFSManager.m:213-214`). Master **Android** threw a bare `Exception("File does not exist")` (`master:RNFSManager.java:389`) which the reject helper turned into `promise.reject(null, …)` (`master:RNFSManager.java:618`) — code `null`, no `ENOENT` anywhere, so 3.x Android code matching on `ENOENT` never worked. In 4.x both platforms reject `ENOENT` (`ios/Fs2.swift:183-187`, `RNFSManager.kt:357`) — iOS briefly resolved instead, on an incorrect code comment claiming master did not throw; fixed on this branch. Net effect versus 3.x: iOS is unchanged, and Android's error gained the `ENOENT` code and prefix it always should have had. 4.x Android also resolves `content://` paths before deleting (`RNFSManager.kt:356`) where master used the raw string (`master:RNFSManager.java:387`), so `unlink` on a content URI now deletes the underlying file instead of failing. |
 | `exists` | `exists(filepath: string): Promise<boolean>` | `exists(filepath: string): Promise<boolean>` | 💥 **on Android, for `content://` paths only.** iOS is unchanged. Master's Android checked `new File(filepath).exists()` with no URI resolution (`master:RNFSManager.java:206-214`), so `exists('content://…')` was always `false`. 4.x routes through `getOriginalFilepath` (`RNFSManager.kt:158`), which resolves a content URI to its real path via `MediaStore.Images.Media.DATA` (`RNFSManager.kt:62-78`) — so the same call can now return `true`. An improvement, but if you used `exists()` to test "is this a plain filesystem path", it no longer answers that question. Plain paths behave identically. |
-| `readDir` | `readDir(dirPath: string): Promise<ReadDirItem[]>` | `readDir(dirPath: string): Promise<ReadDirItem[]>` | 💥 Same signature, changed item shape — see `ReadDirItem` in section 7. `isFile()`/`isDirectory()` are still **methods**. `ctime`/`mtime` changed from `Date` to a **seconds** timestamp — see the timestamp warning below, which is the silent part. |
+| `readDir` | `readDir(dirPath: string): Promise<ReadDirItem[]>` | `readDir(dirPath: string): Promise<ReadDirItem[]>` | ⚠️ Same signature, changed item shape — see `ReadDirItem` in section 7. `isFile()`/`isDirectory()` are still **methods**. `ctime`/`mtime` changed from `Date` to milliseconds since the epoch — see below. `item.mtime.getTime()` is a compile error, so this is caught rather than silent. |
 
-### ⚠️ Timestamps changed unit, not just type
-
-This is the single easiest thing to get wrong in the migration, so it gets its own heading.
+### Timestamps: `Date` → milliseconds
 
 `readDir()` and `stat()` in 3.x returned **`Date` objects**. In 4.x they return **numbers in
-seconds since the epoch** — not milliseconds.
+milliseconds since the epoch**, so `new Date(item.mtime)` reconstructs the 3.x value.
 
 | | master (3.x) | nitro (4.x) |
 |---|---|---|
 | native emits | seconds (`master:ios/RNFSManager.m:97-98`, which formats via `master:ios/RNFSManager.m:663`; `master:RNFSManager.java:346`, `master:RNFSManager.java:371-372`) | seconds (`ios/Fs2.swift:238-239`, `ios/Fs2.swift:276-277`; `RNFSManager.kt:322-326`, `RNFSManager.kt:346-347`) |
-| JS layer | multiplies by 1000, wraps in `new Date()` (`master:src/index.ts:209-210`, `master:src/index.ts:224-225`) | passes the number through unchanged (`src/index.ts:123-124`, `src/index.ts:135-136`) |
-| you receive | `Date` | `number`, **seconds** |
+| JS layer | multiplies by 1000, wraps in `new Date()` (`master:src/index.ts:209-210`, `master:src/index.ts:224-225`) | multiplies by 1000 (`src/index.ts:133-134`, `src/index.ts:145-146`) |
+| you receive | `Date` | `number`, **milliseconds** |
 
-`item.mtime.getTime()` is a compile error, so that path is safe. These are not:
+Both natives emit whole seconds, on both versions — that is a Nitro-struct detail, documented
+at `src/nitro/Fs2.nitro.ts:9-12`, not something a caller sees. The conversion happens in the JS
+wrapper exactly where 3.x did it.
 
 ```ts
-new Date(item.mtime)          // 1970-01-20, not 2026. Multiply by 1000.
-item.mtime > Date.now()       // always false
-b.mtime - a.mtime             // sorts correctly; magnitudes are 1000x off
+// 3.x
+const d = items[0].mtime                 // Date
+
+// 4.x
+const d = new Date(items[0].mtime)       // same instant
+items[0].mtime > Date.now()              // works
 ```
 
-Neither `src/types.ts:29-30` nor the Nitro spec states the unit. Treat every `ctime`/`mtime`
-you read as seconds and convert at the boundary.
+`item.mtime.getTime()` is a compile error, so any 3.x call site treating the value as a `Date`
+is caught by the compiler rather than silently misreading it. A missing `ctime` stays
+`undefined` rather than becoming `0` — Android's `readDir` does not populate it
+(`Fs2.kt:138`).
 
 ## 2. File read and write
 
@@ -77,7 +82,7 @@ you read as seconds and convert at the boundary.
 | `writeFile` | `writeFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | `writeFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | ⚠️ Signature identical, but master forwarded the **whole parsed options object** to native (`master:src/index.ts:268`) and iOS really did read a protection key out of it (`master:ios/RNFSManager.m:117-119`), so `NSFileProtectionKey` rode along with the encoding. 4.x passes only `(path, data)`. Because `EncodingOrOptions` also narrowed (section 7), an inline `{ encoding: 'utf8', NSFileProtectionKey: … }` is now a compile error (`TS2353`) rather than a silent drop — but a pre-typed options variable still slips through and loses the key. |
 | `appendFile` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | `appendFile(filepath, contents: string, encodingOrOptions?): Promise<void>` | ✅ Master did not forward options here either, so nothing is lost. Both create the file if it is missing (`master:ios/RNFSManager.m:139-148`; `ios/Fs2.swift:466-479`). |
 | `write` | `write(filepath, contents, position?, encodingOrOptions?): Promise<null>` | `write(filepath, contents, position?, encodingOrOptions?): Promise<void>` | 🔁 Declared return type only. Master declared `Promise<null>` but resolved `undefined`; 4.x declares what it does. `position` still defaults to append: master coerced `undefined` to `-1` in JS, 4.x passes `undefined` and both natives treat a missing/negative position as "seek to end" (`ios/Fs2.swift:590-593`; `Fs2.kt:278` → `RNFSManager.kt:133`). |
-| `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | 💥 Same signature, changed result shape — see `StatResult` in section 7 and the timestamp warning above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). |
+| `stat` | `stat(filepath: string): Promise<StatResult>` | `stat(filepath: string): Promise<StatResult>` | ⚠️ Same signature, changed result shape — see `StatResult` in section 7 and the timestamps subsection above. `isFile()`/`isDirectory()` are still methods. `mode` is iOS-only natively and defaults to `0` on Android instead of being absent. **iOS also gained `originalFilepath`**: master's ObjC stat dictionary had no such key (`master:ios/RNFSManager.m:96-102`), so `stat().originalFilepath` was `undefined` on 3.x iOS; 4.x returns the normalized path (`ios/Fs2.swift:286`). |
 | `hash` | `hash(filepath: string, algorithm: string): Promise<string>` | `hash(filepath: string, algorithm: HashAlgorithm): Promise<string>` | ⚠️ `algorithm` narrowed from `string` to `'md5' \| 'sha1' \| 'sha256' \| 'sha384' \| 'sha512'`. **`sha224` was dropped.** Master implemented it on both platforms (`master:RNFSManager.java:252`, `master:ios/RNFSManager.m:359`, `master:ios/RNFSManager.m:384-385`) and `master:README.md:164` documents it as public API. It is unreachable in 4.x by every route: the TS union excludes it, and so do both generated enums (`nitrogen/generated/ios/swift/HashAlgorithm.swift`, `nitrogen/generated/android/kotlin/…/HashAlgorithm.kt`, which is `MD5, SHA1, SHA256, SHA384, SHA512`). The 4.x Kotlin helper still lists `sha224` in its lookup map (`RNFSManager.kt:184`) but nothing can reach it — `Fs2.kt:302` can only pass an enum case. Note `HashAlgorithm` **is not exported from the package root**, so you cannot name this parameter's type in your own code. |
 | `touch` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | `touch(filepath, mtime?: Date, ctime?: Date): Promise<void>` | 💥 **on Android — see the defect note below.** Public signature unchanged, still takes `Date`. Master gated `ctime` behind a JS-side `Platform.OS === 'ios'` check (`master:src/index.ts:357-358`); 4.x passes both through and lets native decide. Android still only applies `mtime` (`Fs2.kt:312-315`). |
 
@@ -243,8 +248,8 @@ Adding these to the re-export block at `src/index.ts:21-35` would be a one-line 
 
 | Type | master (3.x) | nitro (4.x) | What changed |
 |---|---|---|---|
-| `ReadDirItem` | `{ ctime: Date \| undefined; mtime: Date \| undefined; name; path; size; isFile(): boolean; isDirectory(): boolean }` | `{ name; path; size; mtime: number; ctime?: number; isFile(): boolean; isDirectory(): boolean }` | 💥 `ctime`/`mtime` are numbers in **seconds** — see the timestamp warning in section 1. Master's declared type said `Date \| undefined` while the code resolved `null` (`master:src/index.ts:209-210`), so the type was wrong there too. In 4.x `mtime` is required; `ctime` is omitted rather than nulled, and on Android `readDir` never populates it at all (`Fs2.kt:138` passes `null`) while `stat` reuses `mtime`. **`isFile()`/`isDirectory()` remain methods** — a maintainer decision, so `items[0].isFile()` keeps working. |
-| `StatResult` | `{ type: any; name: string \| undefined; path; size; mode; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | `{ type?: any; name?: string; path; size; mode: number; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | 💥 for the timestamp unit; otherwise 4.x is the more honest declaration. Master's type said `ctime`/`mtime` were `number` while `stat()` actually resolved `Date` objects — it went unnoticed because `NativeModules.RNFSManager` is `any`, so nothing type-checked the mapping. 4.x really does return numbers (in seconds). `type` and `name` are marked optional because **neither is populated** by `stat()` — equally true on master, where the type simply claimed otherwise. `mode` is iOS-only natively and is `0` on Android rather than absent. The native `type` is now the `'file' \| 'directory'` union `StatResultType` instead of the numeric `RNFSFileTypeRegular`/`RNFSFileTypeDirectory` constants (which are gone). |
+| `ReadDirItem` | `{ ctime: Date \| undefined; mtime: Date \| undefined; name; path; size; isFile(): boolean; isDirectory(): boolean }` | `{ name; path; size; mtime: number; ctime?: number; isFile(): boolean; isDirectory(): boolean }` | ⚠️ `ctime`/`mtime` are numbers in **milliseconds** — see the timestamps subsection in section 1. `.getTime()` on them is a compile error, so 3.x call sites are caught. Master's declared type said `Date \| undefined` while the code resolved `null` (`master:src/index.ts:209-210`), so the type was wrong there too. In 4.x `mtime` is required; `ctime` is omitted rather than nulled, and on Android `readDir` never populates it at all (`Fs2.kt:138` passes `null`) while `stat` reuses `mtime`. **`isFile()`/`isDirectory()` remain methods** — a maintainer decision, so `items[0].isFile()` keeps working. |
+| `StatResult` | `{ type: any; name: string \| undefined; path; size; mode; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | `{ type?: any; name?: string; path; size; mode: number; ctime: number; mtime: number; originalFilepath; isFile(); isDirectory() }` | ⚠️ for the timestamp type; otherwise 4.x is the more honest declaration. Master's type said `ctime`/`mtime` were `number` while `stat()` actually resolved `Date` objects — it went unnoticed because `NativeModules.RNFSManager` is `any`, so nothing type-checked the mapping. 4.x really does return numbers, in milliseconds. `type` and `name` are marked optional because **neither is populated** by `stat()` — equally true on master, where the type simply claimed otherwise. `mode` is iOS-only natively and is `0` on Android rather than absent. The native `type` is now the `'file' \| 'directory'` union `StatResultType` instead of the numeric `RNFSFileTypeRegular`/`RNFSFileTypeDirectory` constants (which are gone). |
 | `MkdirOptions` | `{ NSURLIsExcludedFromBackupKey?: boolean; NSFileProtectionKey?: string }` | `{ excludedFromBackup?: boolean; fileProtection?: FileProtectionType }` | ⚠️ Both keys renamed. Compile error on an object literal; silently ignored via a widened variable. |
 | `FileProtectionType` | — (was a loose `string`) | `'NSFileProtectionNone' \| 'NSFileProtectionComplete' \| 'NSFileProtectionCompleteUnlessOpen' \| 'NSFileProtectionCompleteUntilFirstUserAuthentication'` | ➕ New union replacing the free-form string. **Not exported** — see above. |
 | `FileOptions` | `{ NSFileProtectionKey?: string }` | — | ❌ Removed with the `moveFile`/`copyFile` options parameter. |
@@ -328,9 +333,6 @@ These are the 💥 rows. Nothing will tell you; you have to go looking.
 ```bash
 # Download promise resolves the jobId now, not { statusCode, bytesWritten }.
 grep -rn "downloadFile" --include=*.ts --include=*.tsx --include=*.js src/
-
-# stat()/readDir() timestamps are SECONDS, not Dates and not milliseconds.
-grep -rn "\.mtime\|\.ctime" --include=*.ts --include=*.tsx --include=*.js src/
 
 # cacheable/discretionary were inert on 3.x and are live now.
 grep -rn "cacheable\|discretionary" src/

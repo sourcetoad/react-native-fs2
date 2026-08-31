@@ -64,6 +64,16 @@ const downloadListeners = {
 };
 
 /**
+ * Both platforms emit `ctime`/`mtime` as whole seconds since the epoch - iOS from
+ * `timeIntervalSince1970`, Android from `lastModified() / 1000`. JS dates are milliseconds, so
+ * convert at this boundary exactly as 3.x did (master:src/index.ts:209-210, 224-225) rather
+ * than leaving every caller to remember the factor. `undefined` passes through untouched:
+ * Android's `readDir` does not populate `ctime`.
+ */
+const secondsToMs = <T extends number | undefined>(seconds: T): T =>
+  (seconds === undefined ? undefined : seconds * 1000) as T;
+
+/**
  * Legacy-compatible API
  */
 const compat = {
@@ -120,8 +130,8 @@ const compat = {
           name: item.name,
           path: item.path,
           size: item.size,
-          mtime: item.mtime,
-          ctime: item.ctime,
+          mtime: secondsToMs(item.mtime),
+          ctime: secondsToMs(item.ctime),
           isFile: () => item.isFile,
           isDirectory: () => item.isDirectory,
         }))
@@ -132,8 +142,8 @@ const compat = {
     return RNFS2Nitro.stat(normalizeFilePath(filepath)).then(
       (result: NativeStatResult) => ({
         path: filepath,
-        ctime: result.ctime,
-        mtime: result.mtime,
+        ctime: secondsToMs(result.ctime),
+        mtime: secondsToMs(result.mtime),
         size: result.size,
         mode: result.mode ?? 0,
         originalFilepath: result.originalFilepath,

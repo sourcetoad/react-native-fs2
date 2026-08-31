@@ -52,9 +52,22 @@ describe('readDir', () => {
       name: 'a.txt',
       path: '/tmp/a.txt',
       size: 3,
-      mtime: 1700000000,
-      ctime: 1600000000,
     });
+  });
+
+  // Native emits whole seconds on both platforms; the public API is milliseconds, so that
+  // `new Date(item.mtime)` works. Without the conversion it lands in January 1970.
+  it('converts native seconds to milliseconds', async () => {
+    const items = await RNFS.readDir('/tmp');
+
+    expect(items[0]!.mtime).toBe(1700000000000);
+    expect(items[0]!.ctime).toBe(1600000000000);
+    expect(new Date(items[0]!.mtime).getUTCFullYear()).toBe(2023);
+  });
+
+  it('leaves a missing ctime undefined rather than converting it to 0', async () => {
+    const items = await RNFS.readDir('/tmp');
+
     expect(items[1]!.ctime).toBeUndefined();
   });
 
@@ -82,6 +95,15 @@ describe('stat', () => {
 
     expect(result.isFile()).toBe(true);
     expect(result.isDirectory()).toBe(false);
+  });
+
+  // Same seconds-to-milliseconds conversion as readDir. 3.x returned Date objects built the
+  // same way (master:src/index.ts:224-225); 4.x returns the millisecond value itself.
+  it('converts native seconds to milliseconds', async () => {
+    const result = await RNFS.stat('/tmp/a.txt');
+
+    expect(result.mtime).toBe(1700000000000);
+    expect(result.ctime).toBe(1600000000000);
   });
 
   it('reports a directory', async () => {
