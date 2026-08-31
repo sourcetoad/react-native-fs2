@@ -183,12 +183,13 @@ const fileChecksum = await RNFS.hash('FileToHash', 'md5')
 ### `writeFile`
 ```ts
 // writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void>
-await RNFS.write('FileToWrite', 'ContentsToWrite', 'utf8')
+await RNFS.writeFile('FileToWrite', 'ContentsToWrite', 'utf8')
 ```
 * Write the `contents` to `filepath`
 * Optionally includes `EncodingOrOptions` with values:
-  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'`
-  * ...fileoptions
+  * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
+* In 3.x this parameter also carried iOS `FileOptions` (`NSFileProtectionKey`) through to
+  native. It no longer does — see the breaking changes note on file protection.
 
 
 ### `appendFile`
@@ -610,8 +611,25 @@ await MediaStore.queryMediaStore({ ... });
 
 #### `moveFile` and `copyFile` lost their `options` parameter
 
-Both now take `(filepath, destPath)` only. The iOS `NSFileProtectionKey` option is not
-available on them in 4.x.
+Both now take `(filepath, destPath)` only.
+
+#### iOS file protection is unavailable on `writeFile`, `moveFile` and `copyFile`
+
+In 3.x, `NSFileProtectionKey` reached native on all three — `writeFile` because the encoding
+argument forwarded the whole options object, `moveFile`/`copyFile` via their third parameter.
+None of them accept it in 4.0. `mkdir` still does, as `fileProtection`.
+
+```typescript
+// v3.x — set the protection class while writing
+await RNFS.writeFile(path, data, { encoding: 'utf8', NSFileProtectionKey: 'NSFileProtectionComplete' });
+
+// v4.x — create the directory with the protection class instead
+await RNFS.mkdir(dir, { fileProtection: 'NSFileProtectionComplete' });
+await RNFS.writeFile(path, data, 'utf8');
+```
+
+Files inherit their directory's protection class, so pre-creating the directory covers most
+cases. Restoring the option on all three is planned for 4.1.
 
 #### `moveFile` and `copyFile` overwrite an existing destination on iOS
 
