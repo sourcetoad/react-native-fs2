@@ -31,7 +31,6 @@ class Fs2Stream: HybridFs2StreamSpec {
     var writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation?
     var writeBufferStream: AsyncStream<(Data, Bool)>?
     var shouldFlush: Bool = false
-    var shouldClose: Bool = false
     init(fileHandle: FileHandle, options: WriteStreamOptions?) {
       self.fileHandle = fileHandle
       self.options = options
@@ -153,11 +152,6 @@ class Fs2Stream: HybridFs2StreamSpec {
               state.shouldFlush = false
             }
 
-            if state.shouldClose {
-              try? state.fileHandle.close()
-              state.isActive = false
-              break
-            }
           }
         } catch {
           self.withRegistry { self.writeStreamErrorListeners[streamId] }?(WriteStreamErrorEvent(
@@ -419,11 +413,19 @@ class Fs2Stream: HybridFs2StreamSpec {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
-      state.shouldClose = true
+      // `writeToStream` only enqueues - it resolves as soon as the chunk is accepted, not
+      // when it reaches the file. Cancelling the writer here therefore discarded every chunk
+      // still buffered, silently truncating the destination: a caller whose writes had all
+      // resolved still got a short file. Finish the queue and await the drain, exactly as
+      // `endWriteStream` already did.
       state.writeBufferContinuation?.finish()
-      state.task?.cancel()
+      if let task = state.task {
+        _ = await task.result
+      }
       try? state.fileHandle.close()
 
+      // After the await, so the writer's finish event has already been delivered. Removing
+      // the listeners first would have dropped it.
       self.withRegistry { _ = self.writeStreamProgressListeners.removeValue(forKey: streamId) }
       self.withRegistry { _ = self.writeStreamFinishListeners.removeValue(forKey: streamId) }
       self.withRegistry { _ = self.writeStreamErrorListeners.removeValue(forKey: streamId) }
