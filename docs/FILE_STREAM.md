@@ -229,6 +229,34 @@ interface WriteStreamHandle {
 }
 ```
 
+#### `write()` resolves when a chunk is accepted, not when it is written
+
+Both platforms hand the chunk to a background writer and resolve immediately. Two consequences
+are easy to trip over:
+
+- **`getPosition()` lags.** It reports bytes actually written, so reading it straight after
+  `write()` resolves can return the position from before that chunk — or `0`, if nothing has
+  drained yet. Wait for a write-progress event when you need an exact figure.
+- **Terminate the stream before assuming the file is complete.** `end()` waits for the queue
+  to drain; so does `close()`. Until one of them resolves, the file on disk may be short.
+
+```typescript
+const stream = await createWriteStream(path);
+
+const landed = new Promise<number>((resolve) =>
+  listenToWriteStreamProgress(stream.streamId, (e) => resolve(e.bytesWritten))
+);
+await stream.write(data);   // accepted
+await landed;               // written
+await stream.getPosition(); // now accurate
+```
+
+#### `end()` and `close()` are the same operation
+
+Call one, not both. Whichever runs first drains the queue and drops the stream, so the second
+reports `ENOENT: No such write stream`. This is why the high-level helpers wrap their cleanup
+in a swallow-and-continue rather than propagating that error.
+
 ### Stream Event Listeners
 
 ```typescript
