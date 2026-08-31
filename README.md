@@ -112,6 +112,7 @@ const fsInfo = await RNFS.getFSInfo()
 const externalFileDirs = await RNFS.getAllExternalFilesDirs()
 ```
 * Returns an `array` with the absolute paths to application-specific directories on all shared/external storage devices where the application can place persistent files it owns.
+* Android only. On iOS it rejects with `ENOTSUP: getAllExternalFilesDirs is not supported on iOS`.
 
 ### `unlink`
 ```ts
@@ -301,6 +302,7 @@ await RNFS.touch('FilePath', Date, Date)
 // scanFile(path: string): Promise<string[]>
 await RNFS.scanFile('FilePath')
 ```
+* Android only. On iOS it rejects with `ENOTSUP: scanFile is not supported on iOS`.
 * Scan the file using [Media Scanner](https://developer.android.com/reference/android/media/MediaScannerConnection).
 * Resolves with the scanned paths. On iOS this is a no-op that resolves `[]`.
 

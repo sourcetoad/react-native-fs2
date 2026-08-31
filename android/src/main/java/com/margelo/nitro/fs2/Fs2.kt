@@ -429,24 +429,24 @@ class Fs2() : HybridFs2Spec() {
         }
     }
 
+    /**
+     * iOS-only. Android downloads cannot be paused and resumed - once stopped they are
+     * cancelled - and 3.x had no Android implementation at all, so this threw a TypeError at
+     * the call site. Rejecting ENOTSUP keeps it loud rather than silently doing nothing.
+     */
     override fun resumeDownload(jobId: Double): Promise<Unit> {
-        // Android's DownloadManager does not directly support pausing and resuming downloads
-        // in the same way iOS does. Once a download is stopped, it's typically cancelled.
-        // For now, we'll make this a no-op or reject, as it's marked iOS-only in Fs2.nitro.ts.
         return Promise.async {
-            // Option 1: Reject as not supported
-            // throw Error("resumeDownload is not supported on Android")
-
-            // Option 2: No-op (as it's iOS only and this maintains consistency with the .nitro.ts
-            // comment)
-            return@async // Does nothing.
+            throw FsError("ENOTSUP: resumeDownload is not supported on Android")
         }
     }
 
+    /**
+     * iOS-only, as [resumeDownload]. Resolving `false` here would be worse than throwing: it is
+     * indistinguishable from a real "this download cannot be resumed".
+     */
     override fun isResumable(jobId: Double): Promise<Boolean> {
-        // As per resumeDownload, this is not directly applicable to Android's DownloadManager.
         return Promise.async {
-            return@async false // Or throw an error if preferred.
+            throw FsError("ENOTSUP: isResumable is not supported on Android")
         }
     }
 

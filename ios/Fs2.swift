@@ -755,15 +755,18 @@ class Fs2: HybridFs2Spec {
   }
 
   // misc
+  // Android-only. 3.x had no iOS implementation at all, so these threw a TypeError at the
+  // call site; rejecting ENOTSUP keeps them loud and says why, and matches the iOS MediaStore
+  // stubs. Resolving [] would read as "the scan found nothing".
   func scanFile(path: String) -> Promise<[String]> {
     return Promise<[String]>.async {
-      []
+      throw RuntimeError.error(withMessage: "ENOTSUP: scanFile is not supported on iOS")
     }
   }
 
   func getAllExternalFilesDirs() -> Promise<[String]> {
     return Promise<[String]>.async {
-      []
+      throw RuntimeError.error(withMessage: "ENOTSUP: getAllExternalFilesDirs is not supported on iOS")
     }
   }
 }
