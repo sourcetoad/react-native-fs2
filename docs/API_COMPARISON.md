@@ -119,6 +119,12 @@ The wrapper briefly passed the native return value straight through, resolving a
 while still typed `Promise<any>` — silent, since nothing objected at compile or run time. Fixed
 on this branch (`src/index.ts:336-353`).
 
+A failed download **rejects** the promise. It used to resolve: the error reached the `error`
+callback, but both platforms then settled the promise anyway from their cleanup path - iOS
+because `downloadCleanup`'s `defer` resumes whatever continuation is still registered, Android
+because `onCleanup` always ran. So `await promise` succeeded for a 404, a DNS failure or a
+write error. Fixed on this branch (`ios/Fs2.swift:841-862`, `Fs2.kt:381-390`).
+
 One declaration change: `statusCode`/`bytesWritten` are **optional** on `DownloadResult` now.
 3.x declared them required, but that was wrong even then — its iOS native attached each key
 only when the value was non-nil (`master:ios/RNFSManager.m:501-508`) — and a download stopped
