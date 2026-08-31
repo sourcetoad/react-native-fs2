@@ -290,7 +290,9 @@ class RNFSManager(private val context: ReactApplicationContext) {
     private fun statContentUri(uri: Uri, filepath: String): NativeStatResult {
         val resolver = context.contentResolver
         var size = -1L
-        var lastModified: Long? = null
+        // Both in SECONDS, matching what NativeStatResult carries.
+        var modifiedSec: Long? = null
+        var createdSec: Long? = null
 
         // Query without a projection — providers expose different column sets,
         // and asking for a column a provider lacks throws.
@@ -299,8 +301,26 @@ class RNFSManager(private val context: ReactApplicationContext) {
                 val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
                 if (sizeIdx != -1) size = cursor.getLong(sizeIdx)
 
+                // Two provider families, two column names, two units. DocumentsContract uses
+                // "last_modified" in milliseconds; MediaStore uses "date_modified" in seconds.
+                // Looking only for the former left every content://media/... stat reporting
+                // mtime 0, i.e. 1970, because MediaStore simply does not have that column.
                 val lmIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-                if (lmIdx != -1) lastModified = cursor.getLong(lmIdx)
+                if (lmIdx != -1 && !cursor.isNull(lmIdx)) {
+                    modifiedSec = cursor.getLong(lmIdx) / 1000
+                } else {
+                    val dmIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                    if (dmIdx != -1 && !cursor.isNull(dmIdx)) {
+                        modifiedSec = cursor.getLong(dmIdx)
+                    }
+                }
+
+                // MediaStore records a real creation time, so ctime need not just echo mtime
+                // the way it does for a plain File.
+                val daIdx = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
+                if (daIdx != -1 && !cursor.isNull(daIdx)) {
+                    createdSec = cursor.getLong(daIdx)
+                }
             }
         }
 
@@ -319,10 +339,10 @@ class RNFSManager(private val context: ReactApplicationContext) {
             throw IORejectionException("ENOENT", "File does not exist: $filepath")
         }
 
-        val mtimeSec = lastModified?.let { it / 1000 } ?: 0L
+        val mtimeSec = modifiedSec ?: 0L
 
         return NativeStatResult(
-            ctime = mtimeSec.toDouble(),
+            ctime = (createdSec ?: mtimeSec).toDouble(),
             mtime = mtimeSec.toDouble(),
             size = if (size >= 0) size.toDouble() else 0.0,
             type = StatResultType.FILE, // content URIs are files, never directories
