@@ -353,7 +353,11 @@ class Fs2() : HybridFs2Spec() {
         options: DownloadFileOptions,
         headers: Map<String, String>?
     ): Promise<Double> {
-        val downloadPromise:Promise<Double> = Promise()
+        val downloadPromise: Promise<Double> = Promise()
+        // `onCleanup` always fires, including after a failure, so without this guard a failed
+        // download resolved successfully - the error reached the `error` listener but the
+        // promise still settled with the jobId.
+        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
 
         try {
             val currentJobId = options.jobId
@@ -376,10 +380,19 @@ class Fs2() : HybridFs2Spec() {
                     }
                     this.onDownloadError = { event ->
                         listeners.errorListeners[event.jobId]?.invoke(event)
+                        if (settled.compareAndSet(false, true)) {
+                            downloadPromise.reject(
+                                FsError(
+                                    "EDOWNLOAD: ${event.error ?: "download failed"}"
+                                )
+                            )
+                        }
                     }
                     this.onCleanup = { finishedJobId ->
                         downloaderDidFinish(finishedJobId)
-                        downloadPromise.resolve(finishedJobId.toDouble())
+                        if (settled.compareAndSet(false, true)) {
+                            downloadPromise.resolve(finishedJobId.toDouble())
+                        }
                     }
                 }
 
@@ -403,7 +416,9 @@ class Fs2() : HybridFs2Spec() {
                 )
             )
 
-            downloadPromise.reject(fsError(options.toFile, e))
+            if (settled.compareAndSet(false, true)) {
+                downloadPromise.reject(fsError(options.toFile, e))
+            }
         }
 
         return downloadPromise

@@ -849,10 +849,16 @@ extension Fs2: DownloaderDelegate {
     )
 
     var listener: ((DownloadEventResult) -> Void)?
+    var continuation: CheckedContinuation<Double, Error>?
     self.downloaderQueue.sync {
       listener = self.errorListeners[Double(jobId)]
+      // Take the continuation here so `downloadCleanup`'s defer cannot resolve it afterwards.
+      // Without this the promise resolved successfully for every failed download - a 404, a
+      // DNS failure, a write error - because cleanup resumes whatever is still registered.
+      continuation = self.downloadContinuations.removeValue(forKey: jobId)
     }
     listener?(event)
+    continuation?.resume(throwing: error)
   }
 
   func downloadCanBeResumed(jobId: Int) {
