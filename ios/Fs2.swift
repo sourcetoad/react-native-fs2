@@ -126,23 +126,23 @@ class Fs2: HybridFs2Spec {
             break
           }
         }
-        
-        if let excludedFromBackup = options.excludedFromBackup, excludedFromBackup {
-          // Note: The key for excluding from backup is NSURLIsExcludedFromBackupKey,
-          // and it applies to a URL object, not directly as a file attribute for createDirectory.
-          // This needs to be set *after* the directory is created.
-          // We will handle this after the directory creation.
-        }
+
+        // `excludedFromBackup` maps to NSURLIsExcludedFromBackupKey, which applies to a URL
+        // rather than to createDirectory's attributes, so it is handled after creation below.
       }
       
       do {
         try fileManager.createDirectory(atPath: filepath, withIntermediateDirectories: true, attributes: attributes.isEmpty ? nil : attributes)
         
-        // Handle excludedFromBackup after directory creation
-        if let options = options, let excludedFromBackup = options.excludedFromBackup, excludedFromBackup {
+        // Handle excludedFromBackup after directory creation.
+        // Acting on presence rather than on `true` is deliberate: 3.x checked only that the key
+        // was supplied and forwarded whatever value it held (master:ios/RNFSManager.m:249-251),
+        // so `false` un-excludes a directory. Gating on `excludedFromBackup == true` made the
+        // flag one-way and silently dropped every `false`.
+        if let options = options, let excludedFromBackup = options.excludedFromBackup {
           var url = URL(fileURLWithPath: filepath)
           var resourceValues = URLResourceValues()
-          resourceValues.isExcludedFromBackup = true
+          resourceValues.isExcludedFromBackup = excludedFromBackup
           try url.setResourceValues(resourceValues)
         }
         
