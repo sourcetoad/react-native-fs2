@@ -271,3 +271,65 @@ describe('downloadFile', () => {
     expect(mockNitro.downloadFile.mock.calls[0][0].toFile).toBe('/tmp/a.bin');
   });
 });
+
+// iOS file protection. 3.x accepted NSFileProtectionKey on writeFile/moveFile/copyFile as well
+// as mkdir (master:ios/RNFSManager.m:117,236,418,446); the Nitro port dropped it from the first
+// three. These cover the JS half of restoring it - that the option reaches the native call.
+describe('file protection', () => {
+  beforeEach(() => {
+    mockNitro.moveFile = jest.fn().mockResolvedValue(undefined);
+    mockNitro.copyFile = jest.fn().mockResolvedValue(undefined);
+    mockNitro.writeFile = jest.fn().mockResolvedValue(undefined);
+  });
+
+  it('forwards fileProtection through moveFile', async () => {
+    await RNFS.moveFile('/tmp/a', '/tmp/b', {
+      fileProtection: 'NSFileProtectionComplete',
+    });
+
+    expect(mockNitro.moveFile).toHaveBeenCalledWith('/tmp/a', '/tmp/b', {
+      fileProtection: 'NSFileProtectionComplete',
+    });
+  });
+
+  it('forwards fileProtection through copyFile', async () => {
+    await RNFS.copyFile('/tmp/a', '/tmp/b', {
+      fileProtection: 'NSFileProtectionCompleteUnlessOpen',
+    });
+
+    expect(mockNitro.copyFile).toHaveBeenCalledWith('/tmp/a', '/tmp/b', {
+      fileProtection: 'NSFileProtectionCompleteUnlessOpen',
+    });
+  });
+
+  // writeFile has no options parameter of its own - protection rides in the same object as the
+  // encoding, exactly as it did in 3.x (master:src/index.ts:264-268).
+  it('forwards fileProtection given alongside writeFile encoding', async () => {
+    await RNFS.writeFile('/tmp/a', 'hi', {
+      encoding: 'utf8',
+      fileProtection: 'NSFileProtectionNone',
+    });
+
+    expect(mockNitro.writeFile).toHaveBeenCalledWith(
+      '/tmp/a',
+      expect.any(ArrayBuffer),
+      { fileProtection: 'NSFileProtectionNone' }
+    );
+  });
+
+  it('omits protection when moveFile is called without options', async () => {
+    await RNFS.moveFile('/tmp/a', '/tmp/b');
+
+    expect(mockNitro.moveFile).toHaveBeenCalledWith('/tmp/a', '/tmp/b', {});
+  });
+
+  it('omits protection when writeFile is given a bare encoding string', async () => {
+    await RNFS.writeFile('/tmp/a', 'hi', 'base64');
+
+    expect(mockNitro.writeFile).toHaveBeenCalledWith(
+      '/tmp/a',
+      expect.any(ArrayBuffer),
+      {}
+    );
+  });
+});

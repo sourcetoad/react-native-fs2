@@ -1,6 +1,7 @@
 # Handoff — API comparison pass and on-device verification
 
-Branch `nitro-migration`, 25 commits on top of `73b542b`. All gates green.
+Branch `nitro-migration`, 26 commits on top of `73b542b`, plus the file-protection work
+described below sitting uncommitted in the working tree. All gates green.
 
 ## What happened
 
@@ -33,6 +34,14 @@ errors. Compiling found none. Running on a device found four:
 Three of those live in files the earlier review had listed as **unreviewed**. That list is
 predictive, not decorative.
 
+The file-protection pass since then adds a fifth kind: **writing the fix can introduce a worse
+bug than the one being fixed.** Applying protection inside `moveFile`'s existing `do` block put
+it in the scope of the copy-and-delete fallback, whose first act is to delete the destination.
+A `setAttributes` failure would therefore have destroyed a file that had just moved
+successfully. Nothing tests that path — the catch is only reachable on a cross-volume move.
+Protection is now applied outside the block (`ios/Fs2.swift:422-426`), and `copyFile` had a
+milder version of the same shape.
+
 Second lesson, learned twice: **assert on this library's behaviour, not the peer's.** Two
 checks originally asserted `statusCode === 200` and that `begin` fired. Both failed for reasons
 outside the library — a rate-limiting host, then a chunked response with no `Content-Length`,
@@ -60,8 +69,8 @@ unused `try?` at `Fs2Stream.swift:119`.
 ## On-device verification
 
 `example/src/verify.ts` runs on app launch, exercises the real native layer, renders a
-pass/fail list in the example app and writes a JSON report. Currently **iOS 18/0 (1 skip),
-Android 19/0**.
+pass/fail list in the example app and writes a JSON report. Currently **iOS 21/0 (1 skip),
+Android 22/0**.
 
 ```bash
 cd example && npx react-native start &                       # Metro must be running
@@ -92,8 +101,9 @@ public URL: Metro is running whenever the app is, and it is reachable on both pl
 
 ## Decisions taken — do not re-litigate
 
-- `moveFile`/`copyFile`/`writeFile` **keep** losing iOS file protection; restore in 4.1. `mkdir`
-  still accepts it, and the README documents pre-creating the directory as the workaround.
+- ~~`moveFile`/`copyFile`/`writeFile` keep losing iOS file protection; restore in 4.1.~~
+  **Done** — restored on all three, key renamed `fileProtection` to match `MkdirOptions`. The
+  README's pre-create-the-directory workaround is gone. See "File protection" below.
 - `MkdirOptions` keys stay renamed; no back-compat aliases.
 - iOS `copyFile`/`moveFile` **overwrite** an existing destination (parity with Android,
   `MIGRATION_CHECKLIST.md:19`).
@@ -108,6 +118,28 @@ public URL: Metro is running whenever the app is, and it is reachable on both pl
 - From earlier sessions: `isFile`/`isDirectory` are accessor methods; `downloadFile(options,
   headers?)` keeps its two-parameter Nitro shape; `completeHandlerIOS` is deferred, so iOS
   background downloads are unusable in 4.0.
+
+## File protection (restored)
+
+`FileOptions` is back on `writeFile`, `moveFile` and `copyFile` with `NSFileProtectionKey`
+renamed `fileProtection` and narrowed to the `FileProtectionType` union, matching the
+`MkdirOptions` decision. Three notes worth keeping:
+
+- **`writeFile` sets protection at creation, not after.** `Data.write(to:)` takes no attribute
+  dictionary, so the protected path uses `createFile(atPath:contents:attributes:)` as 3.x did
+  (`master:ios/RNFSManager.m:121`). Applying it afterwards would leave the contents briefly
+  readable at the default class. Unprotected writes keep the original `write(to:)` path, which
+  reports a far better error — hence two branches (`ios/Fs2.swift:104-123`).
+- **Protection rides in `writeFile`'s encoding argument**, as it did in 3.x. It is not a fourth
+  parameter; `parseOptions` splits the object (`src/index.ts:216-223`).
+- **Only partly verifiable.** Nothing in the public API reads a protection class back, so
+  `verify.ts` can only confirm the option is accepted and the file survives. Asserting the class
+  was actually applied needs a native test target or a new `stat` field.
+
+A TDD note for the next person: the first four `parseOptions` tests passed the moment they were
+written, because that function already spreads the whole options object through — the gap was
+the return *type*, which jest cannot see. Type-level gaps need `tsc` as the failing gate; jest
+will happily green-light them.
 
 ## What is left
 
@@ -153,8 +185,18 @@ reference copy of master's Java). It dirties every `git status`. Gitignore it or
 
 ## Verifying the comparison document
 
-Every `file:line` in `docs/API_COMPARISON.md` resolves (98 citations, 0 bad). If you edit it,
+Every `file:line` in `docs/API_COMPARISON.md` resolves (105 citations, 0 bad). If you edit it,
 re-run the checker — a script that extracts each citation, pulls that range from the working
 tree or `git show master:`, and prints it. Round one of the review found 14 wrong line numbers
 purely from eyeballing `sed` output, including one wrong citation inherited from the previous
 author and repeated in my own first draft. Do not eyeball line numbers.
+
+**Two hazards the first checker missed.** Five `src/index.ts` citations were wrong when the
+file-protection work re-audited them:
+
+- *Resolving is not the same as being right.* Three of the five landed on real, non-blank code —
+  just the wrong code, because a "does this line exist and is it non-empty" check passes on any
+  in-range line. Check the cited text against the claim, not merely that something is there.
+- *Editing code invalidates citations elsewhere.* Adding an options parameter to `moveFile` and
+  `copyFile` shifted everything below by 13 lines. Any change to a heavily-cited file means
+  re-running the checker over the whole document, not just the rows you touched.

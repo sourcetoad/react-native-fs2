@@ -78,21 +78,23 @@ await RNFS.mkdir(`FolderToCreate`);
 
 ### `moveFile`
 ```ts
-// moveFile(filepath: string, destPath: string): Promise<void>
+// moveFile(filepath: string, destPath: string, options?: FileOptions): Promise<void>
 await RNFS.moveFile('FileToMove', 'DestinationLocation')
 ```
 
 * Moves file from `filepath` to `destPath`
-* The `options: FileOptions` parameter (iOS `NSFileProtectionKey`) was dropped in 4.x.
+* Optionally takes `FileOptions` — `fileProtection: FileProtectionType` (iOS), applied to the
+  destination. Renamed from `NSFileProtectionKey` in 4.x. Ignored on Android.
 
 ### `copyFile`
 ```ts
-// copyFile(filepath: string, destPath: string): Promise<void>
+// copyFile(filepath: string, destPath: string, options?: FileOptions): Promise<void>
 await RNFS.copyFile('FileToCopy', 'DestinationLocation')
 ```
 
 * Copies file from `filepath` to `destPath`
-* The `options: FileOptions` parameter (iOS `NSFileProtectionKey`) was dropped in 4.x.
+* Optionally takes `FileOptions` — `fileProtection: FileProtectionType` (iOS), applied to the
+  destination. Renamed from `NSFileProtectionKey` in 4.x. Ignored on Android.
 
 ### `getFSInfo`
 ```ts
@@ -197,8 +199,9 @@ await RNFS.writeFile('FileToWrite', 'ContentsToWrite', 'utf8')
 * Write the `contents` to `filepath`
 * Optionally includes `EncodingOrOptions` with values:
   * `'utf8'` (default) | `'base64'` (for binary files) | `'ascii'` | `'arraybuffer'`
-* In 3.x this parameter also carried iOS `FileOptions` (`NSFileProtectionKey`) through to
-  native. It no longer does — see the breaking changes note on file protection.
+* This parameter also carries iOS `FileOptions`, as it did in 3.x — pass
+  `{ encoding: 'utf8', fileProtection: 'NSFileProtectionComplete' }` to set the protection
+  class as the file is written. The key was renamed from `NSFileProtectionKey` in 4.x.
 
 
 ### `appendFile`
@@ -634,27 +637,24 @@ await MediaStore.queryMediaStore({ ... });
 and suggests the new name. It only slips through silently if the options object reaches the
 call as a separately-typed variable, so check those by hand.
 
-#### `moveFile` and `copyFile` lost their `options` parameter
+#### `FileOptions.NSFileProtectionKey` renamed to `fileProtection`
 
-Both now take `(filepath, destPath)` only.
-
-#### iOS file protection is unavailable on `writeFile`, `moveFile` and `copyFile`
-
-In 3.x, `NSFileProtectionKey` reached native on all three — `writeFile` because the encoding
-argument forwarded the whole options object, `moveFile`/`copyFile` via their third parameter.
-None of them accept it in 4.0. `mkdir` still does, as `fileProtection`.
+`writeFile`, `moveFile` and `copyFile` still accept iOS file protection, as they did in 3.x —
+`writeFile` through its encoding argument, `moveFile`/`copyFile` through a third parameter —
+but the key is renamed and its type narrowed from `string` to the `FileProtectionType` union.
 
 ```typescript
-// v3.x — set the protection class while writing
+// v3.x
 await RNFS.writeFile(path, data, { encoding: 'utf8', NSFileProtectionKey: 'NSFileProtectionComplete' });
+await RNFS.moveFile(from, to, { NSFileProtectionKey: 'NSFileProtectionComplete' });
 
-// v4.x — create the directory with the protection class instead
-await RNFS.mkdir(dir, { fileProtection: 'NSFileProtectionComplete' });
-await RNFS.writeFile(path, data, 'utf8');
+// v4.x
+await RNFS.writeFile(path, data, { encoding: 'utf8', fileProtection: 'NSFileProtectionComplete' });
+await RNFS.moveFile(from, to, { fileProtection: 'NSFileProtectionComplete' });
 ```
 
-Files inherit their directory's protection class, so pre-creating the directory covers most
-cases. Restoring the option on all three is planned for 4.1.
+Passed inline the old key is a compile error. It only slips through silently if the options
+object reaches the call as a separately-typed variable, so check those by hand.
 
 #### `moveFile` and `copyFile` overwrite an existing destination on iOS
 

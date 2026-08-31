@@ -64,7 +64,9 @@ class Fs2() : HybridFs2Spec() {
         }
     }
 
-    override fun moveFile(filepath: String, destPath: String): Promise<Unit> {
+    // `options` is iOS-only file protection; Android has no equivalent, so it is accepted
+    // and ignored rather than rejected - the same shape `mkdir` already has.
+    override fun moveFile(filepath: String, destPath: String, options: FileOptions?): Promise<Unit> {
         return Promise.async {
             try {
                 rnfsManager.moveFile(filepath, destPath)
@@ -76,7 +78,9 @@ class Fs2() : HybridFs2Spec() {
         }
     }
 
-    override fun copyFile(filepath: String, destPath: String): Promise<Unit> {
+    // `options` is iOS-only file protection; Android has no equivalent, so it is accepted
+    // and ignored rather than rejected - the same shape `mkdir` already has.
+    override fun copyFile(filepath: String, destPath: String, options: FileOptions?): Promise<Unit> {
         return Promise.async {
             try {
                 // Directly call RNFSManager.copyFile.
@@ -177,7 +181,9 @@ class Fs2() : HybridFs2Spec() {
         }
     }
 
-    override fun writeFile(path: String, data: ArrayBuffer): Promise<Unit> {
+    // `options` is iOS-only file protection; Android has no equivalent, so it is accepted
+    // and ignored rather than rejected - the same shape `mkdir` already has.
+    override fun writeFile(path: String, data: ArrayBuffer, options: FileOptions?): Promise<Unit> {
         val copiedBuffer: ArrayBuffer
         try {
             // Create a copy of the ArrayBuffer to ensure we have ownership

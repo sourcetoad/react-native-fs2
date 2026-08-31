@@ -1,6 +1,7 @@
 import type {
   DownloadFileOptions as DownloadFileOptionsNitro,
   DownloadEventResult,
+  FileOptions,
 } from './nitro/Fs2.nitro';
 import type {
   ReadStreamOptions as ReadStreamOptionsNitro,
@@ -13,7 +14,12 @@ import type {
 } from './nitro/Fs2Stream.nitro';
 
 export type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
-export type EncodingOrOptions = Encoding | { encoding?: Encoding };
+// `fileProtection` rides alongside the encoding rather than in a parameter of its own,
+// because that is where 3.x put NSFileProtectionKey (master:src/index.ts:264-268). It is
+// read by writeFile only; the other readers ignore it.
+export type EncodingOrOptions =
+  | Encoding
+  | ({ encoding?: Encoding } & FileOptions);
 
 /**
  * A `readDir` entry.

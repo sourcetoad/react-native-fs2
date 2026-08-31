@@ -532,6 +532,62 @@ export async function runVerification(): Promise<Report> {
     );
   }
 
+  // iOS file protection, restored on writeFile/moveFile/copyFile. Nothing in the public API
+  // reads a protection class back, so these cannot assert that the class was actually applied -
+  // what they do cover is that the option reaches native, is accepted, and leaves a readable
+  // file behind. Every native defect found on this branch so far was of exactly that kind.
+  await check(
+    'writeFile() accepts fileProtection and still writes',
+    'file-protection',
+    async () => {
+      const file = `${root}/protected-write.txt`;
+      await RNFS.writeFile(file, 'guarded', {
+        encoding: 'utf8',
+        fileProtection: 'NSFileProtectionComplete',
+      });
+
+      const back = await RNFS.readFile(file, 'utf8');
+      assert(back === 'guarded', `read back ${JSON.stringify(back)}`);
+      return `wrote and re-read ${(await RNFS.stat(file)).size} bytes`;
+    }
+  );
+
+  await check(
+    'copyFile() accepts fileProtection and still copies',
+    'file-protection',
+    async () => {
+      const from = `${root}/protect-copy-src.txt`;
+      const to = `${root}/protect-copy-dst.txt`;
+      await RNFS.writeFile(from, 'copy me', 'utf8');
+      await RNFS.copyFile(from, to, {
+        fileProtection: 'NSFileProtectionCompleteUntilFirstUserAuthentication',
+      });
+
+      assert(await RNFS.exists(from), 'source disappeared after copyFile');
+      const back = await RNFS.readFile(to, 'utf8');
+      assert(back === 'copy me', `read back ${JSON.stringify(back)}`);
+      return 'copied with protection, both paths intact';
+    }
+  );
+
+  await check(
+    'moveFile() accepts fileProtection and still moves',
+    'file-protection',
+    async () => {
+      const from = `${root}/protect-move-src.txt`;
+      const to = `${root}/protect-move-dst.txt`;
+      await RNFS.writeFile(from, 'move me', 'utf8');
+      await RNFS.moveFile(from, to, {
+        fileProtection: 'NSFileProtectionComplete',
+      });
+
+      assert(!(await RNFS.exists(from)), 'source survived moveFile');
+      const back = await RNFS.readFile(to, 'utf8');
+      assert(back === 'move me', `read back ${JSON.stringify(back)}`);
+      return 'moved with protection, source gone';
+    }
+  );
+
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
   const skipped = checks.filter((c) => c.status === 'skip').length;

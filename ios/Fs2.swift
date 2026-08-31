@@ -75,7 +75,7 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func writeFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
+  func writeFile(filepath: String, data: ArrayBuffer, options: FileOptions?) -> Promise<Void> {
     // Buffers arriving from JS are non-owning and unsafe past this synchronous
     // call; ones that already own their memory need no copy at all.
     let copiedBuffer = data.asOwning()
@@ -100,40 +100,36 @@ class Fs2: HybridFs2Spec {
         }
       }
       
-      do {
-        let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBuffer to Data
-        try fileData.write(to: URL(fileURLWithPath: filepath))
-        return // Return Void on success
-      } catch {
-        throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath): \(error.localizedDescription)")
+      let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBuffer to Data
+      let attributes = Self.protectionAttributes(options?.fileProtection)
+
+      // Two paths on purpose. `Data.write(to:)` cannot set attributes, and applying protection
+      // after the write would leave the contents briefly readable at the default protection
+      // level. `createFile` sets them as the file is created, which is what 3.x did
+      // (master:ios/RNFSManager.m:121). It reports only a Bool though, so the richer error from
+      // `write(to:)` is kept for the far more common unprotected write.
+      if attributes.isEmpty {
+        do {
+          try fileData.write(to: URL(fileURLWithPath: filepath))
+          return // Return Void on success
+        } catch {
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath): \(error.localizedDescription)")
+        }
       }
+
+      guard fileManager.createFile(atPath: filepath, contents: fileData, attributes: attributes) else {
+        throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath)")
+      }
+      return // Return Void on success
     }
   }
   
   func mkdir(filepath: String, options: MkdirOptions?) -> Promise<Void> {
     return Promise<Void>.async {
       let fileManager = FileManager.default
-      var attributes: [FileAttributeKey: Any] = [:]
-      
-      if let options = options {
-        if let fileProtection = options.fileProtection {
-          switch fileProtection {
-          case .nsfileprotectionnone:
-            attributes[.protectionKey] = FileProtectionType.nsfileprotectionnone
-          case .nsfileprotectioncomplete:
-            attributes[.protectionKey] = FileProtectionType.nsfileprotectioncomplete
-          case .nsfileprotectioncompleteunlessopen:
-            attributes[.protectionKey] = FileProtectionType.nsfileprotectioncompleteunlessopen
-          case .nsfileprotectioncompleteuntilfirstuserauthentication:
-            attributes[.protectionKey] = FileProtectionType.nsfileprotectioncompleteuntilfirstuserauthentication
-          @unknown default:
-            break
-          }
-        }
-
-        // `excludedFromBackup` maps to NSURLIsExcludedFromBackupKey, which applies to a URL
-        // rather than to createDirectory's attributes, so it is handled after creation below.
-      }
+      // `excludedFromBackup` maps to NSURLIsExcludedFromBackupKey, which applies to a URL
+      // rather than to createDirectory's attributes, so it is handled after creation below.
+      let attributes = Self.protectionAttributes(options?.fileProtection)
       
       do {
         try fileManager.createDirectory(atPath: filepath, withIntermediateDirectories: true, attributes: attributes.isEmpty ? nil : attributes)
@@ -200,6 +196,37 @@ class Fs2: HybridFs2Spec {
   }
   
   // Helper function to normalize file paths by removing "file://" prefix if present
+  /// Maps the spec's `FileProtectionType` onto the `FileAttributeKey` dictionary that
+  /// `FileManager` accepts. Empty when no protection was requested, so callers can pass `nil`
+  /// through to APIs that treat an empty dictionary differently from an absent one.
+  private static func protectionAttributes(_ fileProtection: FileProtectionType?) -> [FileAttributeKey: Any] {
+    guard let fileProtection = fileProtection else { return [:] }
+
+    switch fileProtection {
+    case .nsfileprotectionnone:
+      return [.protectionKey: FileProtectionType.nsfileprotectionnone]
+    case .nsfileprotectioncomplete:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncomplete]
+    case .nsfileprotectioncompleteunlessopen:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncompleteunlessopen]
+    case .nsfileprotectioncompleteuntilfirstuserauthentication:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncompleteuntilfirstuserauthentication]
+    @unknown default:
+      return [:]
+    }
+  }
+
+  /// Sets protection on an item that already exists. `moveItem`/`copyItem` take no attribute
+  /// dictionary, so protection has to follow the operation - as it did in 3.x
+  /// (master:ios/RNFSManager.m:417-425). A failure here is surfaced rather than swallowed,
+  /// because a caller that asked for protection and silently did not get it is worse than an
+  /// error.
+  private static func applyProtection(_ fileProtection: FileProtectionType?, toItemAtPath path: String) throws {
+    let attributes = protectionAttributes(fileProtection)
+    guard !attributes.isEmpty else { return }
+    try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
+  }
+
   private static func normalizePath(_ path: String) -> String {
     if path.hasPrefix("file://") {
       return String(path.dropFirst("file://".count))
@@ -344,7 +371,7 @@ class Fs2: HybridFs2Spec {
     }
   }
   
-  func moveFile(filepath: String, destPath: String) -> Promise<Void> {
+  func moveFile(filepath: String, destPath: String, options: FileOptions?) -> Promise<Void> {
     return Promise<Void>.async {
       let fileManager = FileManager.default
       let normalizedFilepath = Self.normalizePath(filepath)
@@ -377,7 +404,6 @@ class Fs2: HybridFs2Spec {
           try fileManager.removeItem(atPath: finalDestPath)
         }
         try fileManager.moveItem(atPath: normalizedFilepath, toPath: finalDestPath)
-        return // Return Void on success
       } catch {
         // Attempt to copy and delete if move fails (e.g., across different volumes)
         // This is a common fallback strategy.
@@ -387,16 +413,21 @@ class Fs2: HybridFs2Spec {
           }
           try fileManager.copyItem(atPath: normalizedFilepath, toPath: finalDestPath)
           try fileManager.removeItem(atPath: normalizedFilepath) // Delete original after successful copy
-          return // Return Void on success
         } catch let fallbackError {
           // If both move and copy-delete fail, throw an error reflecting the move operation
           throw RuntimeError.error(withMessage: "EMOVE: Failed to move file from \(normalizedFilepath) to \(finalDestPath). Move error: \(error.localizedDescription). Fallback copy error: \(fallbackError.localizedDescription)")
         }
       }
+
+      // Deliberately outside the do/catch above: the fallback branch deletes finalDestPath
+      // before retrying, so a protection failure raised inside it would destroy the file that
+      // had just been moved successfully.
+      try Self.applyProtection(options?.fileProtection, toItemAtPath: finalDestPath)
+      return // Return Void on success
     }
   }
   
-  func copyFile(filepath: String, destPath: String) -> Promise<Void> {
+  func copyFile(filepath: String, destPath: String, options: FileOptions?) -> Promise<Void> {
     return Promise<Void>.async {
       let fileManager = FileManager.default
       let normalizedFilepath = Self.normalizePath(filepath)
@@ -429,10 +460,13 @@ class Fs2: HybridFs2Spec {
           try fileManager.removeItem(atPath: finalDestPath)
         }
         try fileManager.copyItem(atPath: normalizedFilepath, toPath: finalDestPath)
-        return // Return Void on success
       } catch {
         throw RuntimeError.error(withMessage: "ECOPY: Failed to copy file from \(normalizedFilepath) to \(finalDestPath): \(error.localizedDescription)")
       }
+
+      // Outside the do/catch so a protection failure is not reported as a copy failure.
+      try Self.applyProtection(options?.fileProtection, toItemAtPath: finalDestPath)
+      return // Return Void on success
     }
   }
   

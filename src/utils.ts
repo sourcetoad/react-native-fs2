@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 
+import type { FileOptions } from './nitro/Fs2.nitro';
 import type {
   Encoding,
   EncodingOrOptions,
@@ -145,7 +146,7 @@ export function normalizeFilePath(path: string): string {
  */
 export function parseOptions(encodingOrOptions?: EncodingOrOptions): {
   encoding: Encoding;
-} {
+} & FileOptions {
   let options = { encoding: 'utf8' as Encoding };
   if (!encodingOrOptions) return options;
   if (typeof encodingOrOptions === 'string') {

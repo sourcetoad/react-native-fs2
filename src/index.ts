@@ -2,6 +2,7 @@ import { NitroModules } from 'react-native-nitro-modules';
 import type { Fs2 } from './nitro/Fs2.nitro';
 import type {
   MkdirOptions,
+  FileOptions,
   FSInfoResult,
   ReadDirItem as NativeReadDirItem,
   DownloadEventResult,
@@ -22,6 +23,7 @@ import type {
 export type {
   StatResultType,
   MkdirOptions,
+  FileOptions,
   FSInfoResult,
   DownloadEventResult,
   HashAlgorithm,
@@ -102,17 +104,27 @@ const compat = {
     return RNFS2Nitro.mkdir(normalizeFilePath(filepath), options);
   },
 
-  moveFile(filepath: string, destPath: string): Promise<void> {
+  moveFile(
+    filepath: string,
+    destPath: string,
+    options: FileOptions = {}
+  ): Promise<void> {
     return RNFS2Nitro.moveFile(
       normalizeFilePath(filepath),
-      normalizeFilePath(destPath)
+      normalizeFilePath(destPath),
+      options
     );
   },
 
-  copyFile(filepath: string, destPath: string): Promise<void> {
+  copyFile(
+    filepath: string,
+    destPath: string,
+    options: FileOptions = {}
+  ): Promise<void> {
     return RNFS2Nitro.copyFile(
       normalizeFilePath(filepath),
-      normalizeFilePath(destPath)
+      normalizeFilePath(destPath),
+      options
     );
   },
 
@@ -201,12 +213,13 @@ const compat = {
     contents: string,
     encodingOrOptions?: EncodingOrOptions
   ): Promise<void> {
-    const options = parseOptions(encodingOrOptions);
-    const data = encodeContents(contents, options.encoding);
+    const { encoding, ...fileOptions } = parseOptions(encodingOrOptions);
+    const data = encodeContents(contents, encoding);
 
     return RNFS2Nitro.writeFile(
       normalizeFilePath(filepath),
-      data as ArrayBuffer
+      data as ArrayBuffer,
+      fileOptions
     );
   },
 

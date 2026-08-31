@@ -25,7 +25,7 @@ export interface NativeStatResult {
   originalFilepath: string;
 }
 
-// For MkdirOptions
+// For MkdirOptions and FileOptions
 export type FileProtectionType =
   | 'NSFileProtectionNone'
   | 'NSFileProtectionComplete'
@@ -36,6 +36,17 @@ export type FileProtectionType =
 export interface MkdirOptions {
   // e.g., NSURLIsExcludedFromBackupKey for iOS
   excludedFromBackup?: boolean;
+  fileProtection?: FileProtectionType; // iOS only, maps to NSFileProtectionKey
+}
+
+/**
+ * Options for the operations that create a file: `writeFile`, `moveFile` and `copyFile`.
+ *
+ * 3.x accepted `NSFileProtectionKey` on all three (`master:ios/RNFSManager.m:117,418,446`).
+ * The key is renamed here for the same reason `MkdirOptions`' keys were - the `NS` prefix
+ * describes an Objective-C constant, not this API.
+ */
+export interface FileOptions {
   fileProtection?: FileProtectionType; // iOS only, maps to NSFileProtectionKey
 }
 
@@ -98,8 +109,16 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
 
   // File System Operations
   mkdir(filepath: string, options?: MkdirOptions): Promise<void>;
-  moveFile(filepath: string, destPath: string): Promise<void>;
-  copyFile(filepath: string, destPath: string): Promise<void>;
+  moveFile(
+    filepath: string,
+    destPath: string,
+    options?: FileOptions
+  ): Promise<void>;
+  copyFile(
+    filepath: string,
+    destPath: string,
+    options?: FileOptions
+  ): Promise<void>;
   unlink(filepath: string): Promise<void>;
   exists(filepath: string): Promise<boolean>;
   readDir(dirPath: string): Promise<ReadDirItem[]>;
@@ -109,7 +128,11 @@ export interface Fs2 extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
     length: number,
     position: number
   ): Promise<ArrayBuffer>;
-  writeFile(filepath: string, data: ArrayBuffer): Promise<void>;
+  writeFile(
+    filepath: string,
+    data: ArrayBuffer,
+    options?: FileOptions
+  ): Promise<void>;
   appendFile(filepath: string, data: ArrayBuffer): Promise<void>;
   write(filepath: string, data: ArrayBuffer, position?: number): Promise<void>;
   stat(filepath: string): Promise<NativeStatResult>;

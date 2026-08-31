@@ -5,6 +5,7 @@ import {
   decodeContents,
   encodeContents,
   mapPropsWithBigInt,
+  parseOptions,
 } from '../utils';
 import type {
   ReadStreamDataEvent,
@@ -191,5 +192,37 @@ describe('encodeContents / decodeContents', () => {
 
     expect(result.byteLength).toBe(3);
     expect(Array.from(new Uint8Array(result))).toEqual([7, 8, 9]);
+  });
+});
+
+describe('parseOptions', () => {
+  it('defaults to utf8 with no file protection', () => {
+    expect(parseOptions()).toEqual({ encoding: 'utf8' });
+  });
+
+  it('reads an encoding passed as a bare string', () => {
+    expect(parseOptions('base64')).toEqual({ encoding: 'base64' });
+  });
+
+  // 3.x carried NSFileProtectionKey in the same object as the encoding
+  // (master:src/index.ts:264-268), so writeFile's protection has to come out of here rather
+  // than from a separate parameter.
+  it('extracts fileProtection alongside the encoding', () => {
+    expect(
+      parseOptions({
+        encoding: 'ascii',
+        fileProtection: 'NSFileProtectionComplete',
+      })
+    ).toEqual({
+      encoding: 'ascii',
+      fileProtection: 'NSFileProtectionComplete',
+    });
+  });
+
+  it('keeps the default encoding when only fileProtection is given', () => {
+    expect(parseOptions({ fileProtection: 'NSFileProtectionNone' })).toEqual({
+      encoding: 'utf8',
+      fileProtection: 'NSFileProtectionNone',
+    });
   });
 });
