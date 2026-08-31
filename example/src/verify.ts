@@ -16,6 +16,7 @@ import RNFS, {
   createWriteStream,
   listenToReadStreamData,
   listenToReadStreamEnd,
+  listenToWriteStreamProgress,
   processFileInChunks,
   readStream,
   stringToArrayBuffer,
@@ -936,7 +937,19 @@ export async function runVerification(): Promise<Report> {
     async () => {
       const file = `${root}/stream-position.txt`;
       const stream = await createWriteStream(file);
+
+      // `write()` resolves when the chunk is *accepted*, not when it reaches the file - the
+      // same distinction behind the close-truncation bug - so `position` does not advance
+      // until the background writer drains the queue. Reading it straight after `write()`
+      // returned 0 or 10 depending on timing. The progress event is the signal that bytes
+      // actually landed.
+      const wrote = new Promise<number>((resolve) => {
+        listenToWriteStreamProgress(stream.streamId, (e) =>
+          resolve(e.bytesWritten)
+        );
+      });
       await stream.write(stringToArrayBuffer('0123456789', 'utf8'));
+      const reported = await withTimeout(wrote, 15000, 'write progress event');
 
       // Before terminating: `end()` drains and drops the registry entry, after which the
       // handle no longer resolves.
@@ -944,14 +957,18 @@ export async function runVerification(): Promise<Report> {
       await stream.end();
 
       assert(
+        reported === 10,
+        `progress event reported ${reported} bytes, wrote 10`
+      );
+      assert(
         position === 10,
-        `getPosition() reported ${position} after writing 10 bytes`
+        `getPosition() reported ${position} after the write had landed`
       );
       assert(
         typeof position === 'number',
         `getPosition() returned ${typeof position}, not a number - a bigint leaked through`
       );
-      return `position ${position} after 10 bytes`;
+      return `progress ${reported}, position ${position} after 10 bytes`;
     }
   );
 
@@ -1101,6 +1118,95 @@ export async function runVerification(): Promise<Report> {
       'Android-only; iOS has no MediaStore and no content:// scheme'
     );
   }
+
+  // --- Write-side failure paths ---------------------------------------------------------------
+  // Read-side errors were covered; write-side were not. These use a path whose parent is a
+  // regular file, which is ENOTDIR on both platforms - deterministic, and it needs no special
+  // permissions or a full disk to provoke.
+  await check(
+    'writeStream() rejects when the destination cannot be created',
+    'streaming-write-errors',
+    async () => {
+      const blocker = `${root}/not-a-directory.txt`;
+      await RNFS.writeFile(blocker, 'x', 'utf8');
+
+      let rejected = false;
+      let message = '';
+      try {
+        await withTimeout(
+          writeStream(`${blocker}/child.txt`, 'payload', 'utf8'),
+          15000,
+          'writeStream to an unwritable path'
+        );
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'resolved for a path whose parent is a regular file');
+      assert(
+        !message.includes('timed out'),
+        'writeStream() hung instead of rejecting'
+      );
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  // The interesting one: this drives the settle() path in copyFileWithProgress, where the read
+  // stream and the write stream both have to be torn down and the promise rejected. A leak
+  // here shows up as a hang rather than a wrong value.
+  await check(
+    'copyFileWithProgress() rejects for an unwritable destination',
+    'streaming-write-errors',
+    async () => {
+      const source = `${root}/copy-fail-src.txt`;
+      await RNFS.writeFile(source, 'a'.repeat(64 * 1024), 'utf8');
+      const blocker = `${root}/not-a-directory.txt`;
+
+      let rejected = false;
+      let message = '';
+      try {
+        await withTimeout(
+          copyFileWithProgress(source, `${blocker}/child.bin`, {
+            bufferSize: 4096,
+          }),
+          20000,
+          'copyFileWithProgress to an unwritable path'
+        );
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'resolved despite an unwritable destination');
+      assert(
+        !message.includes('timed out'),
+        'copyFileWithProgress() hung - a stream was probably left open'
+      );
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  await check(
+    'createWriteStream() rejects for a directory path',
+    'streaming-write-errors',
+    async () => {
+      const dir = `${root}/a-real-directory`;
+      await RNFS.mkdir(dir);
+
+      let rejected = false;
+      let message = '';
+      try {
+        const stream = await createWriteStream(dir);
+        // Some platforms defer the failure to the first write rather than to open.
+        await stream.write(stringToArrayBuffer('x', 'utf8'));
+        await stream.end();
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'accepted a directory as a write destination');
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
 
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
