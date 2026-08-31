@@ -1,41 +1,94 @@
 import RNFS from 'react-native-fs2';
 import {
   Alert,
-  Pressable,
+  BackHandler,
+  PermissionsAndroid,
+  Platform,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
-  Text,
-  View,
-  Platform,
-  PermissionsAndroid,
 } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getTestFolder, requestAndroidPermission } from './utils';
-import { useEffect, useState } from 'react';
 import { runVerification, type Report } from './verify';
+import { BusyContext } from './busy';
+import { ENTRIES, type EntryKey } from './entries';
+import ExampleList from './screens/ExampleList';
+import Screen from './screens/Screen';
+import VerifyScreen from './screens/VerifyScreen';
 
 /**
- * Examples
+ * React Native's own `SafeAreaView` is a no-op on Android, which left the header colliding
+ * with the status bar clock and the Clean button sitting under the signal icons. Android 15
+ * (API 35) draws edge-to-edge by default, so the inset has to be applied explicitly.
+ *
+ * `react-native-safe-area-context` would be the better tool and also covers the bottom
+ * gesture bar, but adding it makes the library module's codegen emit
+ * `RNCSafeAreaProviderManagerDelegate` a second time and the Android build fails on duplicate
+ * dex classes. That is worth fixing on its own; it should not be fixed inside a UI change.
  */
-import Example1 from './example1';
-import Example2 from './example2';
-import Example3 from './example3';
-import Example4 from './example4';
-import Example5 from './example5';
+const androidStatusBar =
+  Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
 
 const App = () => {
-  // Runs the on-device verification once on launch and renders the result. The unit suite
-  // mocks native, so this is the only thing that exercises the Swift and Kotlin fixes.
+  // Which entry is open. `null` is the list.
+  const [openKey, setOpenKey] = useState<EntryKey | null>(null);
+  // Whether the open example is mid-run, reported up through BusyContext.
+  const [busy, setBusy] = useState(false);
+
+  // The verification run lives here rather than on its screen, so navigating away does not
+  // cancel it and the report survives. It also keeps the launch behaviour the build scripts
+  // rely on: the report is written to disk once, on start, with no interaction.
   const [report, setReport] = useState<Report | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const runVerify = useCallback(() => {
+    setReport(null);
+    setVerifyError(null);
     runVerification()
       .then(setReport)
       .catch((e) => setVerifyError(e?.message ?? String(e)));
   }, []);
 
-  // methods
+  useEffect(runVerify, [runVerify]);
+
+  const openEntry = useMemo(
+    () => ENTRIES.find((e) => e.key === openKey) ?? null,
+    [openKey]
+  );
+
+  // The single exit point, shared by the header control and Android's hardware back.
+  const leave = useCallback(() => {
+    if (!openKey) return false;
+    if (!busy) {
+      setOpenKey(null);
+      return true;
+    }
+    Alert.alert(
+      'Still running',
+      `${openEntry?.title ?? 'This example'} hasn't finished. Leave anyway?`,
+      [
+        { text: 'Stay', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: () => {
+            setBusy(false);
+            setOpenKey(null);
+          },
+        },
+      ]
+    );
+    return true;
+  }, [busy, openKey, openEntry]);
+
+  // Without this, hardware back exits the app from a detail screen.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', leave);
+    return () => sub.remove();
+  }, [leave]);
+
   const cleanExampleFilesAndFolders = async () => {
     try {
       if (Platform.OS === 'android') {
@@ -60,150 +113,52 @@ const App = () => {
     }
   };
 
+  const Body = openEntry?.component;
+
   return (
-    <SafeAreaView>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ minHeight: '100%' }}
-      >
-        <View style={styles.wrapper}>
-          <View style={styles.topBar}>
-            <View>
-              <Text style={styles.title}>Examples</Text>
-            </View>
+    <BusyContext.Provider value={setBusy}>
+      <SafeAreaView style={[styles.safeArea, { paddingTop: androidStatusBar }]}>
+        <StatusBar barStyle="dark-content" />
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ minHeight: '100%' }}
+        >
+          {!openEntry && (
+            <ExampleList
+              onOpen={setOpenKey}
+              onClean={cleanExampleFilesAndFolders}
+              report={report}
+              verifyError={verifyError}
+            />
+          )}
 
-            <View>
-              <Pressable
-                style={({ pressed }) =>
-                  !pressed ? styles.clearButton : styles.clearButtonPressed
-                }
-                onPress={cleanExampleFilesAndFolders}
-              >
-                <Text style={styles.clearButtonText}>
-                  Clean Example Folders/Files
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.topBar}>
-            <View>
-              <Text style={styles.subTitle}>
-                Run the examples below directly to your device or simulators
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.verifyBox}>
-            <Text style={styles.subTitle}>On-device verification</Text>
-            {verifyError && (
-              <Text style={styles.verifyFail}>
-                harness error: {verifyError}
-              </Text>
-            )}
-            {!report && !verifyError && <Text>running…</Text>}
-            {report && (
-              <>
-                <Text
-                  style={report.failed ? styles.verifyFail : styles.verifyPass}
-                >
-                  {report.passed} passed · {report.failed} failed ·{' '}
-                  {report.skipped} skipped
-                </Text>
-                {report.checks.map((c) => (
-                  <Text
-                    key={c.name}
-                    style={
-                      c.status === 'fail'
-                        ? styles.verifyFail
-                        : c.status === 'skip'
-                          ? styles.verifySkip
-                          : styles.verifyPass
-                    }
-                  >
-                    {c.status === 'pass'
-                      ? '✓'
-                      : c.status === 'fail'
-                        ? '✗'
-                        : '–'}{' '}
-                    {c.name} — {c.detail}
-                  </Text>
-                ))}
-              </>
-            )}
-          </View>
-
-          <Example1 />
-          <Example2 />
-          <Example3 />
-          <Example4 />
-          <Example5 />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+          {openEntry && (
+            <Screen
+              // The examples each render their own heading; only the verification screen
+              // needs one supplied.
+              title={openEntry.key === 'verify' ? openEntry.title : undefined}
+              busy={busy}
+              onBack={leave}
+            >
+              {openEntry.key === 'verify' ? (
+                <VerifyScreen
+                  report={report}
+                  error={verifyError}
+                  onRunAgain={runVerify}
+                />
+              ) : (
+                Body && <Body />
+              )}
+            </Screen>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </BusyContext.Provider>
   );
 };
 
 const styles = StyleSheet.create({
-  verifyBox: {
-    width: '100%',
-    marginVertical: 12,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 6,
-  },
-  verifyPass: { color: '#137333', fontSize: 12 },
-  verifyFail: { color: '#c5221f', fontSize: 12, fontWeight: '700' },
-  verifySkip: { color: '#8a8a8a', fontSize: 12 },
-  title: {
-    fontSize: 25,
-  },
-  subTitle: {
-    fontSize: 18,
-  },
-  wrapper: {
-    flex: 1,
-    alignItems: 'flex-start',
-    padding: 10,
-  },
-  topBar: {
-    flexDirection: 'row',
-    width: '100%',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-  clearButton: {
-    backgroundColor: '#2644bc',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 5,
-  },
-  clearButtonPressed: {
-    backgroundColor: '#445ec6',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 5,
-  },
-  clearButtonText: {
-    color: '#fff',
-  },
+  safeArea: { flex: 1, backgroundColor: '#fff' },
 });
 
 export default App;

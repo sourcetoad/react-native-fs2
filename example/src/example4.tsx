@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useRunningState } from './busy';
 import RNFS from 'react-native-fs2';
 import {
   StyleSheet,
@@ -19,7 +20,7 @@ const FILE_NAME2 = 'picsum2.jpg';
 const FILE_URL2 = 'https://picsum.photos/id/237/200/300';
 
 const Example = () => {
-  const [runningAction, setRunningAction] = useState(false);
+  const [runningAction, setRunningAction] = useRunningState();
   const [result, setResult] = useState('');
   const [imageURI, setImageURI] = useState('');
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import RNFS from 'react-native-fs2';
-import { writeStream, readStream } from '../../src/_filestream';
+import { useRunningState } from './busy';
+import RNFS, { readStream, writeStream } from 'react-native-fs2';
 import {
   StyleSheet,
   Text,
@@ -11,7 +11,7 @@ import {
 import { getTestFolder, getFolderText } from './utils';
 
 const Example = () => {
-  const [runningAction, setRunningAction] = useState(false);
+  const [runningAction, setRunningAction] = useRunningState();
   const [result, setResult] = useState('');
 
   const executeExample = async () => {
