@@ -55,17 +55,20 @@ Creates a read stream for reading a large file in chunks.
 
 ```typescript
 interface ReadStreamOptions {
-  bufferSize?: number;  // Chunk size in bytes (native default: 8192)
+  bufferSize?: number;  // Chunk size in bytes (default: 65536)
   start?: number;       // Start position in bytes (default: 0)
   end?: number;         // End position in bytes (default: end of file)
 }
 ```
 
-`bufferSize` left unset falls through to the native default of **8 KB**
-(`ios/BufferPool.swift:6`, `android/.../utils/BufferPool.kt:84`). The high-level helpers below
-(`readStream`, `writeStream`, `copyFileWithProgress`, `processFileInChunks`) instead default to
-**64 KB** (`src/_filestream.ts:368`), because each chunk costs one JSI round trip and a small
-size dominates the cost of a large read.
+`bufferSize` defaults to **64 KB** on both sides — the high-level helpers pass it explicitly
+(`src/_filestream.ts`), and native falls back to the same figure
+(`ios/Fs2Stream.swift`, `android/.../Fs2Stream.kt`). Each chunk costs one JSI round trip, so a
+small size dominates the cost of a large read.
+
+It must be an integer between 1 and 16 MB; anything else is rejected before it reaches native,
+where `0` used to spin the Android read loop forever and a non-finite value aborted the iOS
+process.
 
 #### ExtendedReadStreamHandle
 
@@ -78,7 +81,7 @@ interface ExtendedReadStreamHandle {
 
   start(): Promise<void>;      // Begin reading
   pause(): Promise<void>;      // Pause the read loop
-  resume(): Promise<void>;     // Resume after pause()
+  resume(): Promise<void>;     // Resume after pause()  (see back-pressure, below)
   close(): Promise<void>;      // Close and release native resources
   isActive(): Promise<boolean>;
 }
@@ -92,7 +95,7 @@ The bare `ReadStreamHandle` / `WriteStreamHandle` interfaces are not re-exported
 ```typescript
 function listenToReadStreamData(
   streamId: string,
-  onData: (event: ReadStreamDataEvent) => void
+  onData: (event: ReadStreamDataEvent) => void | Promise<void>
 ): () => void;
 
 function listenToReadStreamProgress(
@@ -112,6 +115,10 @@ function listenToReadStreamError(
 ```
 
 Each returns an unsubscribe function.
+
+`onData` may return a promise. The native read loop awaits it before reading the next chunk,
+so an `async` data listener is how you apply back-pressure — see
+[back-pressure](#back-pressure).
 
 > **One subscriber per (stream, event).** The native side keeps a single callback per stream
 > per event, so registering a second callback for the same pair **replaces** the first, and
@@ -224,7 +231,7 @@ Creates a write stream for writing a large file in chunks.
 ```typescript
 interface WriteStreamOptions {
   append?: boolean;            // Append to an existing file (default: false)
-  bufferSize?: number;         // Internal buffer size in bytes (native default: 8192)
+  bufferSize?: number;         // Bytes allowed to queue at once (default: 65536)
   createDirectories?: boolean; // Create missing parent directories (default: true)
 }
 ```
@@ -244,24 +251,29 @@ interface ExtendedWriteStreamHandle {
 }
 ```
 
-#### `write()` resolves when a chunk is accepted, not when it is written
+#### `write()` resolves when there is room, not when the bytes are on disk
 
-Both platforms hand the chunk to a background writer and resolve immediately. Two consequences
-are easy to trip over:
+Both platforms hand the chunk to a background writer. `write()` resolves once the chunk fits
+within `bufferSize` bytes of queued data, which is the same contract as Node's
+`writable.write()` plus `'drain'` — awaiting it is what keeps a producer from outrunning the
+disk. Await every `write()`: a caller that fires them without awaiting has no bound on how much
+it hands over, exactly as in Node.
+
+Two consequences are easy to trip over:
 
 - **`getPosition()` lags.** It reports bytes actually written, so reading it straight after
-  `write()` resolves can return the position from before that chunk — or `0`, if nothing has
-  drained yet. Wait for a write-progress event when you need an exact figure.
+  `write()` resolves can return the position from before that chunk. Wait for a write-progress
+  event when you need an exact figure.
 - **Terminate the stream before assuming the file is complete.** `end()` waits for the queue
   to drain; so does `close()`. Until one of them resolves, the file on disk may be short.
 
 ```typescript
-const stream = await createWriteStream(path);
+const stream = await createWriteStream(path, { bufferSize: 256 * 1024 });
 
 const landed = new Promise<number>((resolve) =>
   listenToWriteStreamProgress(stream.streamId, (e) => resolve(e.bytesWritten))
 );
-await stream.write(data);   // accepted
+await stream.write(data);   // there is room for it
 await landed;               // written
 await stream.getPosition(); // now accurate
 ```
@@ -407,16 +419,15 @@ await copyFileWithProgress(sourcePath, destPath, {
 });
 ```
 
-Writes are serialised — at most one is in flight — and the read stream is paused once more
-than `highWaterMark` chunks are queued, resuming at half that. Without the pause the reader
-would run ahead of the writer without bound, because native does not await the data callback.
-Both streams are closed on every exit path.
+Writes are serialised — at most one is in flight — and the reader is held once more than
+`highWaterMark` chunks are queued, released again at half that. Both streams are closed on
+every exit path. See [back-pressure](#back-pressure) for how the hold works.
 
 ### `processFileInChunks(filePath, chunkProcessor, options?): Promise<void>`
 
 Reads a file through a stream, handing each chunk to your processor. The processor is awaited
-before the next chunk is handed over, so chunks arrive **in order** even though native does
-not await the data callback.
+before the next chunk is handed over, so chunks arrive **in order**, and the reader is held
+once more than `highWaterMark` chunks (default 8) are outstanding.
 
 ```typescript
 import { processFileInChunks } from 'react-native-fs2';
@@ -429,6 +440,40 @@ await processFileInChunks(
   { bufferSize: 64 * 1024 }  // ReadStreamOptions; start/end accepted too
 );
 ```
+
+## Back-pressure
+
+The read loop runs on a background thread and would otherwise read at disk speed regardless of
+how fast the consumer is. Everything it read ahead would sit in the JSI dispatcher's unbounded
+queue as an owning copy, so peak memory tracked the **file** size rather than the buffer size —
+a 1 GB file at the 64 KB default is 16,384 chunks queued ahead of JS.
+
+The bound lives in native. The data callback is declared as returning `Promise<void>`, and both
+read loops await it before reading the next chunk:
+
+```typescript
+listenToReadStreamData(stream.streamId, async (event) => {
+  await uploadPart(event.data);   // the reader waits here
+});
+```
+
+A synchronous listener still works — it is wrapped so native always has something to await, and
+the reader advances after one round trip. Two things to know:
+
+- **A listener that never settles parks the reader.** The descriptor stays open until
+  `close()`, which interrupts a loop waiting on the consumer.
+- **A listener that throws fails the stream.** The rejection propagates to native and surfaces
+  as a read-stream error event, rather than being swallowed.
+
+On the write side, `write()` resolves when the chunk fits within `bufferSize` bytes of queued
+data, so awaiting it is the producer's leash. `copyFileWithProgress` and `processFileInChunks`
+combine both: they return a promise from the data callback that resolves once fewer than
+`highWaterMark` chunks are outstanding, which keeps the reader and the writer pipelined without
+either running away.
+
+`pause()` and `resume()` remain on the handle for manual control, but the helpers no longer use
+them: they are independent async calls with no mutual ordering, so a resume landing before its
+pause left the reader parked with nothing to wake it.
 
 ## Buffer utilities
 
