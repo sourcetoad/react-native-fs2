@@ -17,6 +17,7 @@ import RNFS, {
   listenToReadStreamData,
   listenToReadStreamEnd,
   listenToReadStreamError,
+  listenToReadStreamProgress,
   listenToWriteStreamProgress,
   processFileInChunks,
   readStream,
@@ -1156,6 +1157,93 @@ export async function runVerification(): Promise<Report> {
       }
       assert(rejected, 'accepted bufferSize: 0 on a write stream');
       return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  // flush() used to set a flag consulted only after the next chunk on iOS, and to flush
+  // userspace from the caller's coroutine on Android. Neither guaranteed anything, and both
+  // resolved regardless. It is now ordered through the writer and syncs.
+  await check(
+    'flush() puts earlier writes on disk before it resolves',
+    'streaming-flush',
+    async () => {
+      const file = `${root}/stream-flush.bin`;
+      const stream = await createWriteStream(file);
+      const chunk = new Uint8Array(4096).fill(5).buffer;
+
+      await stream.write(chunk);
+      await withTimeout(stream.flush(), 15000, 'flush');
+
+      // Read the file without closing the stream: only a real flush makes this visible.
+      const size = Number((await RNFS.stat(file)).size);
+      assert(
+        size === 4096,
+        `expected 4096 bytes visible after flush(), got ${size}`
+      );
+
+      await stream.end();
+      return 'flush() made 4096 bytes visible while the stream was still open';
+    }
+  );
+
+  await check(
+    'flush() on a finished stream rejects rather than hanging',
+    'streaming-flush',
+    async () => {
+      const file = `${root}/stream-flush-closed.bin`;
+      const stream = await createWriteStream(file);
+      await stream.write(new Uint8Array(16).fill(1).buffer);
+      await stream.end();
+
+      let rejected = false;
+      let message = '';
+      try {
+        await withTimeout(stream.flush(), 10000, 'flush after end');
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'flush() after end() resolved');
+      return `rejected: ${message.slice(0, 80)}`;
+    }
+  );
+
+  // progress used to be measured against the whole file, so a ranged read could never finish
+  // at 1.0 - it topped out at (end - start + 1) / fileLength.
+  await check(
+    'progress reaches 1.0 on a ranged read',
+    'streaming-progress',
+    async () => {
+      const file = `${root}/stream-progress-range.txt`;
+      await RNFS.writeFile(file, 'q'.repeat(40 * 1024), 'utf8');
+
+      const stream = await createReadStream(file, {
+        bufferSize: 1024,
+        start: 8 * 1024,
+        end: 24 * 1024 - 1,
+      });
+      let last = 0;
+      let totalBytes = 0;
+      const done = new Promise<void>((resolve) => {
+        listenToReadStreamData(stream.streamId, () => {});
+        listenToReadStreamProgress(stream.streamId, (e) => {
+          last = e.progress;
+          totalBytes = e.totalBytes;
+        });
+        listenToReadStreamEnd(stream.streamId, () => resolve());
+      });
+      await stream.start();
+      await withTimeout(done, 15000, 'ranged progress');
+
+      assert(
+        totalBytes === 16 * 1024,
+        `totalBytes was ${totalBytes}, expected the range length 16384`
+      );
+      assert(
+        Math.abs(last - 1) < 1e-9,
+        `final progress was ${last}, expected 1.0`
+      );
+      return `final progress ${last} over totalBytes ${totalBytes}`;
     }
   );
 

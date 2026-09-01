@@ -105,6 +105,17 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
+  /// One item in a write stream's queue.
+  ///
+  /// `data == nil` is a flush marker. Routing flush through the queue rather than setting a
+  /// flag is what makes `await flush()` mean anything: the flag it replaced was only consulted
+  /// *after the next chunk*, so a flush with no write behind it never synced at all, and the
+  /// promise resolved either way.
+  private struct WriteCommand {
+    let data: Data?
+    let completion: CheckedContinuation<Void, Error>?
+  }
+
   private class WriteStreamState {
     let fileHandle: FileHandle
     let options: WriteStreamOptions?
@@ -116,9 +127,8 @@ class Fs2Stream: HybridFs2StreamSpec {
     private var _isActive: Bool = false
     private var _position: Int64 = 0
     private var _task: Task<Void, Never>? = nil
-    private var _writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation?
-    private var _writeBufferStream: AsyncStream<(Data, Bool)>?
-    private var _shouldFlush: Bool = false
+    private var _writeBufferContinuation: AsyncStream<WriteCommand>.Continuation?
+    private var _writeBufferStream: AsyncStream<WriteCommand>?
     private var _pendingBytes: Int = 0
     private var _spaceWaiters: [(bytes: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private var _budgetClosed: Bool = false
@@ -145,17 +155,13 @@ class Fs2Stream: HybridFs2StreamSpec {
       set { sync { _task = newValue } }
     }
     // AsyncStream for Swift 6 compatibility
-    var writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation? {
+    var writeBufferContinuation: AsyncStream<WriteCommand>.Continuation? {
       get { sync { _writeBufferContinuation } }
       set { sync { _writeBufferContinuation = newValue } }
     }
-    var writeBufferStream: AsyncStream<(Data, Bool)>? {
+    var writeBufferStream: AsyncStream<WriteCommand>? {
       get { sync { _writeBufferStream } }
       set { sync { _writeBufferStream = newValue } }
-    }
-    var shouldFlush: Bool {
-      get { sync { _shouldFlush } }
-      set { sync { _shouldFlush = newValue } }
     }
 
     /// Suspends until `bytes` fit within `capacity`, then charges them to the queue.
@@ -361,7 +367,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       state.isActive = true
 
       // Setup AsyncStream for write buffer
-      let (stream, continuation) = AsyncStream<(Data, Bool)>.makeStream()
+      let (stream, continuation) = AsyncStream<WriteCommand>.makeStream()
       state.writeBufferStream = stream
       state.writeBufferContinuation = continuation
       self.withRegistry { self.writeStreams[streamId] = state }
@@ -375,9 +381,26 @@ class Fs2Stream: HybridFs2StreamSpec {
         var hadError = false
 
         do {
-          for await (data, _) in stream {
+          for await command in stream {
+            guard let data = command.data else {
+              // Flush marker: everything queued ahead of it has been written by now.
+              do {
+                try state.fileHandle.synchronize()
+                command.completion?.resume()
+              } catch {
+                command.completion?.resume(throwing: error)
+              }
+              continue
+            }
+
             defer { state.release(data.count) }
-            try state.fileHandle.write(contentsOf: data)
+            do {
+              try state.fileHandle.write(contentsOf: data)
+            } catch {
+              command.completion?.resume(throwing: error)
+              throw error
+            }
+            command.completion?.resume()
 
             state.position += Int64(data.count)
             self.withRegistry { self.writeStreamProgressListeners[streamId] }?(WriteStreamProgressEvent(
@@ -385,12 +408,6 @@ class Fs2Stream: HybridFs2StreamSpec {
               bytesWritten: state.position,
               lastChunkSize: Int64(data.count)
             ))
-
-            if state.shouldFlush {
-              try? state.fileHandle.synchronize()
-              state.shouldFlush = false
-            }
-
           }
         } catch {
           hadError = true
@@ -460,6 +477,12 @@ class Fs2Stream: HybridFs2StreamSpec {
 
       guard let fileHandle = try? FileHandle(forReadingFrom: state.fileURL) else {
         state.isActive = false
+        // Reporting EACCES for an exhausted descriptor table sends anyone debugging a stream
+        // leak looking at file permissions instead.
+        if errno == EMFILE || errno == ENFILE {
+          throw StreamError.ioError(
+            message: "EMFILE: Too many open files - a stream was likely never closed")
+        }
         throw StreamError.accessDenied(path: state.fileURL.path)
       }
       state.fileHandle = fileHandle
@@ -467,6 +490,10 @@ class Fs2Stream: HybridFs2StreamSpec {
       var chunk: Int64 = 0
       let fileLengthUInt = (try? fileHandle.seekToEnd()) ?? 0
       let fileLength = fileLengthUInt > UInt64(Int64.max) ? Int64.max : Int64(fileLengthUInt)
+      // Progress is reported against the range actually being read. Using the whole file meant
+      // a stream with `start` set could never reach 1.0.
+      let lastByte = min(end ?? (fileLength - 1), fileLength - 1)
+      let rangeTotal = max(0, lastByte - start + 1)
       try? fileHandle.seek(toOffset: UInt64(start))
       state.position = start
 
@@ -539,8 +566,8 @@ class Fs2Stream: HybridFs2StreamSpec {
             self.withRegistry { self.readStreamProgressListeners[streamId] }?(ReadStreamProgressEvent(
               streamId: streamId,
               bytesRead: bytesReadTotal,
-              totalBytes: fileLength,
-              progress: fileLength > 0 ? Double(bytesReadTotal) / Double(fileLength) : 0
+              totalBytes: rangeTotal,
+              progress: rangeTotal > 0 ? Double(bytesReadTotal) / Double(rangeTotal) : 0
             ))
 
             if let end = end, position > end {
@@ -554,6 +581,13 @@ class Fs2Stream: HybridFs2StreamSpec {
             success: !state.closedByCaller
           ))
         } catch {
+          if self.withRegistry({ self.readStreamErrorListeners[streamId] }) == nil {
+            // Node throws on an unhandled 'error'. Throwing here would take the app down from a
+            // background task, so it is logged instead - silently dropping it is the one thing
+            // that must not happen.
+            NSLog("[RNFS2] Read stream %@ failed with no error listener attached: %@",
+                  streamId, error.localizedDescription)
+          }
           self.withRegistry { self.readStreamErrorListeners[streamId] }?(ReadStreamErrorEvent(
             streamId: streamId,
             error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
@@ -680,7 +714,8 @@ class Fs2Stream: HybridFs2StreamSpec {
       await state.reserve(data.count)
 
       guard state.isActive,
-            let yielded = state.writeBufferContinuation?.yield((data, false)),
+            let yielded = state.writeBufferContinuation?.yield(
+              WriteCommand(data: data, completion: nil)),
             case .enqueued = yielded else {
         state.release(data.count)
         throw RuntimeError.error(withMessage: "EPIPE: Write stream is not active: \(streamId)")
@@ -694,7 +729,16 @@ class Fs2Stream: HybridFs2StreamSpec {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
-      state.shouldFlush = true
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        guard state.isActive,
+              let yielded = state.writeBufferContinuation?.yield(
+                WriteCommand(data: nil, completion: continuation)),
+              case .enqueued = yielded else {
+          continuation.resume(throwing:
+            RuntimeError.error(withMessage: "EPIPE: Write stream is not active: \(streamId)"))
+          return
+        }
+      }
     }
   }
 

@@ -77,15 +77,43 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         ConcurrentHashMap<String, (WriteStreamErrorEvent) -> Unit>()
 
     // Write stream: queue for incoming writes
+    /**
+     * One item in a write stream's queue.
+     *
+     * [isFlush] is routed through the queue rather than applied from the caller's coroutine so
+     * that it is ordered against the writer. Flushing from the caller raced the writer and only
+     * ever flushed userspace, so `await flush()` guaranteed nothing.
+     */
     private data class WriteRequest(
         val data: ByteArray?,
         val isString: Boolean = false,
-        val isEnd: Boolean = false
+        val isEnd: Boolean = false,
+        val isFlush: Boolean = false,
+        val completion: CompletableDeferred<Unit>? = null
     )
 
     // Add reference to RNFSManager and context
     private val reactContext = NitroModules.applicationContext
         ?: throw Error("No Context available!")
+
+    /**
+     * Emits a read-stream error, or logs it if nobody is listening.
+     *
+     * Node throws on an unhandled `'error'`. Throwing from this coroutine would take the app
+     * down, so it is logged instead - silently dropping it is the one thing that must not
+     * happen.
+     */
+    private fun emitReadError(streamId: String, message: String) {
+        val listener = readStreamErrorListeners[streamId]
+        if (listener == null) {
+            android.util.Log.w(
+                "RNFS2",
+                "Read stream $streamId failed with no error listener attached: $message"
+            )
+            return
+        }
+        listener.invoke(ReadStreamErrorEvent(streamId = streamId, error = message, code = null))
+    }
 
     /**
      * Hands [event] to the JS consumer and waits for it to finish with the chunk.
@@ -290,6 +318,17 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     writeLoop@ while (true) {
                         val req = impl.queue.take()
                         if (req.isEnd) break@writeLoop
+                        if (req.isFlush) {
+                            try {
+                                impl.outputStream.flush()
+                                // Userspace flush alone leaves the bytes in the page cache.
+                                (impl.outputStream as? FileOutputStream)?.fd?.sync()
+                                req.completion?.complete(Unit)
+                            } catch (e: Throwable) {
+                                req.completion?.completeExceptionally(e)
+                            }
+                            continue@writeLoop
+                        }
                         req.data?.let { data ->
                             try {
                                 impl.outputStream.write(data)
@@ -344,8 +383,15 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     } catch (_: Exception) {
                     }
                     impl.state.isActive = false
-                    // Nothing will drain the queue from here on.
+                    // Nothing will drain the queue from here on, so release anyone waiting on
+                    // it: a queued flush would otherwise never settle.
                     impl.budget.close()
+                    while (true) {
+                        val pending = impl.queue.poll() ?: break
+                        pending.completion?.completeExceptionally(
+                            StreamError.StreamInactive(streamId)
+                        )
+                    }
                 }
             }
             return@async WriteStreamHandle(streamId)
@@ -393,6 +439,10 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     var position = start
                     var chunk = 0L
                     val fileLength = state.file.length()
+                    // Progress is reported against the range actually being read. Using the
+                    // whole file meant a stream with `start` set could never reach 1.0.
+                    val lastByte = minOf(end ?: (fileLength - 1), fileLength - 1)
+                    val rangeTotal = maxOf(0L, lastByte - start + 1)
                     var bytesReadTotal = 0L
                     try {
                         state.position = position
@@ -446,9 +496,9 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                     ReadStreamProgressEvent(
                                         streamId = streamId,
                                         bytesRead = bytesReadTotal,
-                                        totalBytes = fileLength,
-                                        progress = if (fileLength > 0)
-                                            bytesReadTotal.toDouble() / fileLength.toDouble()
+                                        totalBytes = rangeTotal,
+                                        progress = if (rangeTotal > 0)
+                                            bytesReadTotal.toDouble() / rangeTotal.toDouble()
                                         else 0.0
                                     )
                                 )
@@ -469,34 +519,16 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                         throw e
                     } catch (e: SecurityException) {
                         val error = StreamError.AccessDenied(state.file.path)
-                        readStreamErrorListeners[streamId]?.invoke(
-                            ReadStreamErrorEvent(
-                                streamId = streamId,
-                                error = error.message ?: "Access denied",
-                                code = null
-                            )
-                        )
+                        emitReadError(streamId, error.message ?: "Access denied")
                     } catch (e: IOException) {
                         val error = StreamError.IOError(e.message ?: "I/O error")
-                        readStreamErrorListeners[streamId]?.invoke(
-                            ReadStreamErrorEvent(
-                                streamId = streamId,
-                                error = error.message ?: "I/O error",
-                                code = null
-                            )
-                        )
+                        emitReadError(streamId, error.message ?: "I/O error")
                     } catch (e: Exception) {
                         val error = when (e) {
                             is StreamError -> e
                             else -> StreamError.IOError(e.message ?: "Unknown error")
                         }
-                        readStreamErrorListeners[streamId]?.invoke(
-                            ReadStreamErrorEvent(
-                                streamId = streamId,
-                                error = error.message ?: "Unknown error",
-                                code = null
-                            )
-                        )
+                        emitReadError(streamId, error.message ?: "Unknown error")
                     } finally {
                         state.isActive = false
                         state.job = null
@@ -607,7 +639,11 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         return Promise.async {
             val impl =
                 writeStreams[streamId] ?: throw FsError("ENOENT: No such write stream: $streamId")
-            impl.outputStream.flush()
+            if (!impl.state.isActive) throw StreamError.StreamInactive(streamId)
+
+            val done = CompletableDeferred<Unit>()
+            impl.queue.add(WriteRequest(null, isFlush = true, completion = done))
+            done.await()
         }
     }
 
