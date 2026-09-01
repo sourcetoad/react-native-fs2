@@ -553,9 +553,18 @@ class Fs2: HybridFs2Spec {
   
   func read(filepath: String, length: Double, position: Double) -> Promise<ArrayBuffer> {
     return Promise<ArrayBuffer>.async {
+      // `UInt64(position)`/`Int(length)` below trap on a negative, NaN or infinite double,
+      // which aborts the process instead of rejecting. `write` already guards its position.
+      guard position.isFinite, position >= 0 else {
+        throw RuntimeError.error(withMessage: "EINVAL: position must be a non-negative finite number, got \(position)")
+      }
+      guard length.isFinite, length >= 0 else {
+        throw RuntimeError.error(withMessage: "EINVAL: length must be a non-negative finite number, got \(length)")
+      }
+
       let normalizedPath = Self.normalizePath(filepath)
       let fileManager = FileManager.default
-      
+
       var isDir: ObjCBool = false
       guard fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) else {
         throw RuntimeError.error(withMessage: "ENOENT: File not found at path: \(normalizedPath)")
@@ -594,17 +603,22 @@ class Fs2: HybridFs2Spec {
   }
   
   func write(filepath: String, data: ArrayBuffer, position: Double?) -> Promise<Void> {
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous call, so the
+    // copy has to happen here rather than inside the async closure below. Reading it there
+    // trapped in `toData(copyIfNeeded:)` on every call. Same treatment as `writeFile`.
+    let copiedBuffer = data.asOwning()
+
     return Promise<Void>.async {
       let normalizedPath = Self.normalizePath(filepath)
       let fileManager = FileManager.default
-      
+
       var isDir: ObjCBool = false
       if fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) && isDir.boolValue {
         throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot write: \(normalizedPath)")
       }
-      
-      let fileData = data.toData(copyIfNeeded: true)
-      
+
+      let fileData = copiedBuffer.toData(copyIfNeeded: false)
+
       // If file doesn't exist, create it with the data and return
       if !fileManager.fileExists(atPath: normalizedPath) {
         let parentDirectoryURL = URL(fileURLWithPath: normalizedPath).deletingLastPathComponent()

@@ -171,12 +171,16 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
         lastProgressEmitTimestamp = now
         shouldEmit = true
       }
-    } else if progressDivider <= 0 {
+    } else if !progressDivider.isFinite || Int(progressDivider.rounded(.down)) <= 0 {
+      // Anything that does not round down to a usable step - 0, a negative, NaN, or a
+      // fraction like 0.5 - means "no throttling". Truncating a fraction to Int gave 0 and
+      // trapped on the `% 0` below.
       shouldEmit = true
     } else {
+      let divider = Int(progressDivider.rounded(.down))
       // Divider logic: emit only if percent changed by divider
       let percent = totalBytesExpectedToWrite > 0 ? Int((Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)) * 100) : 0
-      if percent % Int(progressDivider) == 0 {
+      if percent % divider == 0 {
         if percent != lastProgressValue || totalBytesWritten == totalBytesExpectedToWrite {
           lastProgressValue = percent
           shouldEmit = true
