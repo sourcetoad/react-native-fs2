@@ -140,7 +140,7 @@ interface ReadStreamDataEvent {
 interface ReadStreamProgressEvent {
   streamId: string;
   bytesRead: number;   // Total bytes read so far
-  totalBytes: number;  // Total file size
+  totalBytes: number;  // Bytes in the requested range (the whole file unless start/end are set)
   progress: number;    // Fraction from 0 to 1 - multiply by 100 for a percentage
 }
 
@@ -157,7 +157,8 @@ interface ReadStreamErrorEvent {
 }
 ```
 
-`progress` is a **fraction between 0 and 1**, not a percentage
+`progress` is measured against the **requested range**, so a stream with `start`/`end` set
+still finishes at 1.0. It is a **fraction between 0 and 1**, not a percentage
 (`ios/Fs2Stream.swift:353`, `android/.../Fs2Stream.kt:291`).
 
 ### Read stream example
@@ -243,7 +244,7 @@ interface ExtendedWriteStreamHandle {
   streamId: string;
 
   write(data: ArrayBuffer): Promise<void>;  // Queue a chunk
-  flush(): Promise<void>;                   // Flush buffered data
+  flush(): Promise<void>;                   // Sync everything written so far to disk
   close(): Promise<void>;                   // Drain the queue and finish
   isActive(): Promise<boolean>;
   getPosition(): Promise<number>;           // Bytes actually written
@@ -277,6 +278,16 @@ await stream.write(data);   // there is room for it
 await landed;               // written
 await stream.getPosition(); // now accurate
 ```
+
+#### `flush()` waits for the bytes to reach the disk
+
+`flush()` is queued behind the writes issued before it, so awaiting it means every chunk
+written up to that point has been handed to the file and synced (`fsync` on iOS and on a real
+file on Android; a `content://` destination gets a userspace flush, which is all its stream
+offers). It rejects on a stream that has already been ended or closed.
+
+It is not needed for durability at the end of a stream — `end()` and `close()` both drain and
+sync. Reach for it when you want a checkpoint part-way through a long write.
 
 #### `end()` and `close()` are the same operation
 
