@@ -91,6 +91,51 @@ async function getWriteStreamPositionAsNumber(
   return Number(pos);
 }
 
+const MAX_STREAM_BUFFER_SIZE = 16 * 1024 * 1024;
+
+/**
+ * Rejects option values native cannot survive: `bufferSize` reaches an allocation and a read
+ * length unchecked on both platforms, and a negative `start` traps on iOS.
+ */
+function validateStreamOptions(
+  options: ReadStreamOptions | WriteStreamOptions | undefined
+): void {
+  if (!options) return;
+
+  const { bufferSize } = options;
+  if (bufferSize !== undefined) {
+    if (!Number.isInteger(bufferSize)) {
+      throw new Error(
+        `EINVAL: bufferSize must be a positive integer, got ${bufferSize}`
+      );
+    }
+    if (bufferSize <= 0 || bufferSize > MAX_STREAM_BUFFER_SIZE) {
+      throw new Error(
+        `EINVAL: bufferSize must be between 1 and ${MAX_STREAM_BUFFER_SIZE}, got ${bufferSize}`
+      );
+    }
+  }
+
+  const { start, end } = options as ReadStreamOptions;
+  if (start !== undefined) {
+    if (!Number.isInteger(start) || start < 0) {
+      throw new Error(
+        `EINVAL: start must be a non-negative integer, got ${start}`
+      );
+    }
+  }
+  if (end !== undefined) {
+    if (!Number.isInteger(end) || end < 0) {
+      throw new Error(`EINVAL: end must be a non-negative integer, got ${end}`);
+    }
+    if (start !== undefined && end < start) {
+      throw new Error(
+        `EINVAL: end (${end}) must not be before start (${start})`
+      );
+    }
+  }
+}
+
 /**
  * Create a read stream for efficiently reading large files in chunks
  *
@@ -100,6 +145,7 @@ export async function createReadStream(
   path: string,
   options?: ReadStreamOptions
 ): Promise<ExtendedReadStreamHandle> {
+  validateStreamOptions(options);
   const normalizedPath = normalizeFilePath(path);
 
   const handle = await RNFS2StreamNitro.createReadStream(
@@ -126,6 +172,7 @@ export async function createWriteStream(
   path: string,
   options?: WriteStreamOptions
 ): Promise<ExtendedWriteStreamHandle> {
+  validateStreamOptions(options);
   const normalizedPath = normalizeFilePath(path);
   const handle = await RNFS2StreamNitro.createWriteStream(
     normalizedPath,
@@ -435,8 +482,13 @@ export async function readStream(
       chunks.push(event.data);
     });
 
-    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
+    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, (event) => {
       if (settled) return;
+      // `end` also fires for a stream closed mid-flight, with partial bytes.
+      if (!event.success) {
+        fail(new Error('Read stream ended unsuccessfully'));
+        return;
+      }
       settled = true;
       cleanup();
       closeQuietly(stream);
@@ -490,16 +542,21 @@ export async function writeStream(
       unsubscribeError?.();
     };
 
-    const settle = (error?: unknown) => {
+    const settle = async (error?: unknown) => {
       if (settled) return;
       settled = true;
       cleanup();
+      await closeQuietly(stream);
       if (error) reject(error);
       else resolve();
     };
 
-    unsubscribeFinish = listenToWriteStreamFinish(stream.streamId, () =>
-      settle()
+    unsubscribeFinish = listenToWriteStreamFinish(stream.streamId, (event) =>
+      settle(
+        event.success
+          ? undefined
+          : new Error('Write stream ended unsuccessfully')
+      )
     );
 
     unsubscribeError = listenToWriteStreamError(stream.streamId, (event) =>
@@ -557,10 +614,24 @@ export async function copyFileWithProgress(
     let unsubscribeProgress: (() => void) | null = null;
     let unsubscribeEnd: (() => void) | null = null;
     let unsubscribeError: (() => void) | null = null;
+    let unsubscribeWriteError: (() => void) | null = null;
+    let unsubscribeWriteFinish: (() => void) | null = null;
 
     let queued = 0;
     let paused = false;
     let settled = false;
+    // Set during teardown, so settle() has to consult it after closing rather than before.
+    let writeFailure: unknown = null;
+
+    // pause() and resume() are independent async native calls with no mutual ordering, so
+    // overlapping them can land them in the opposite order - the resume no-ops and the late
+    // pause parks the reader for good. Serialising through one chain makes that impossible.
+    // Rejections are ignored: both report an unknown stream once the loop has finished.
+    let controlChain: Promise<void> = Promise.resolve();
+    const control = (op: () => Promise<void>): Promise<void> => {
+      controlChain = controlChain.then(op).catch(() => {});
+      return controlChain;
+    };
     // Serialises writes: each chunk waits for the previous one to land.
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -587,7 +658,12 @@ export async function copyFileWithProgress(
       }
       await closeQuietly(readStreamHandle);
 
+      // Closing is what makes the writer emit its verdict, so unsubscribe only now.
+      unsubscribeWriteError?.();
+      unsubscribeWriteFinish?.();
+
       if (error) reject(error);
+      else if (writeFailure) reject(writeFailure);
       else if (closeError) reject(closeError);
       else resolve();
     };
@@ -600,9 +676,7 @@ export async function copyFileWithProgress(
         queued += 1;
         if (!paused && queued >= highWaterMark) {
           paused = true;
-          // Pause is best-effort: it reports an unknown stream once the read loop has
-          // already finished, which is not a failure worth propagating.
-          readStreamHandle.pause().catch(() => {});
+          control(() => readStreamHandle.pause());
         }
 
         writeChain = writeChain
@@ -613,7 +687,7 @@ export async function copyFileWithProgress(
 
             if (paused && queued <= lowWaterMark) {
               paused = false;
-              await readStreamHandle.resume().catch(() => {});
+              await control(() => readStreamHandle.resume());
             }
           })
           .catch((error) => {
@@ -629,15 +703,42 @@ export async function copyFileWithProgress(
       );
     }
 
-    unsubscribeEnd = listenToReadStreamEnd(readStreamHandle.streamId, () => {
-      // The reader is done, but queued writes may not be. Settle behind them.
-      writeChain = writeChain.then(() => settle());
-    });
+    unsubscribeEnd = listenToReadStreamEnd(
+      readStreamHandle.streamId,
+      (event) => {
+        // The reader is done, but queued writes may not be. Settle behind them.
+        writeChain = writeChain.then(() =>
+          settle(
+            event.success
+              ? undefined
+              : new Error('Read stream ended unsuccessfully')
+          )
+        );
+      }
+    );
 
     unsubscribeError = listenToReadStreamError(
       readStreamHandle.streamId,
       (event) => {
         settle(new Error(event.error));
+      }
+    );
+
+    // The reader can end cleanly over a writer that died, so watch the write side too.
+    unsubscribeWriteError = listenToWriteStreamError(
+      writeStreamHandle.streamId,
+      (event) => {
+        writeFailure ??= new Error(event.error);
+        settle(writeFailure);
+      }
+    );
+
+    unsubscribeWriteFinish = listenToWriteStreamFinish(
+      writeStreamHandle.streamId,
+      (event) => {
+        if (event.success) return;
+        writeFailure ??= new Error('Write stream ended unsuccessfully');
+        settle(writeFailure);
       }
     );
 
@@ -662,16 +763,31 @@ export async function processFileInChunks(
     chunkIndex: number,
     position: number
   ) => Promise<void> | void,
-  options: ReadStreamOptions = {}
+  options: ReadStreamOptions & {
+    /** Chunks allowed to queue before the read stream is paused. Defaults to 8. */
+    highWaterMark?: number;
+  } = {}
 ): Promise<void> {
+  const { highWaterMark = DEFAULT_HIGH_WATER_MARK, ...readOptions } = options;
   const stream = await createReadStream(filePath, {
     bufferSize: DEFAULT_STREAM_BUFFER_SIZE,
-    ...options,
+    ...readOptions,
   });
+
+  const lowWaterMark = Math.max(1, Math.floor(highWaterMark / 2));
 
   return new Promise<void>((resolve, reject) => {
     let settled = false;
+    let queued = 0;
+    let paused = false;
     let processChain: Promise<void> = Promise.resolve();
+
+    // See copyFileWithProgress: pause and resume must never be in flight together.
+    let controlChain: Promise<void> = Promise.resolve();
+    const control = (op: () => Promise<void>): Promise<void> => {
+      controlChain = controlChain.then(op).catch(() => {});
+      return controlChain;
+    };
 
     let unsubscribeData: (() => void) | null = null;
     let unsubscribeEnd: (() => void) | null = null;
@@ -695,18 +811,38 @@ export async function processFileInChunks(
     unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
       if (settled) return;
 
+      // Awaiting the processor orders chunks but does not slow the reader; only pausing does.
+      queued += 1;
+      if (!paused && queued >= highWaterMark) {
+        paused = true;
+        control(() => stream.pause());
+      }
+
       processChain = processChain
         .then(async () => {
           if (settled) return;
           await chunkProcessor(event.data, event.chunk, event.position);
+        })
+        .then(async () => {
+          queued -= 1;
+          if (paused && queued <= lowWaterMark) {
+            paused = false;
+            await control(() => stream.resume());
+          }
         })
         .catch((error) => {
           settle(error);
         });
     });
 
-    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, () => {
-      processChain = processChain.then(() => settle());
+    unsubscribeEnd = listenToReadStreamEnd(stream.streamId, (event) => {
+      processChain = processChain.then(() =>
+        settle(
+          event.success
+            ? undefined
+            : new Error('Read stream ended unsuccessfully')
+        )
+      );
     });
 
     unsubscribeError = listenToReadStreamError(stream.streamId, (event) => {

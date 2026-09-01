@@ -9,6 +9,7 @@ enum StreamError: LocalizedError, CustomStringConvertible {
     case streamInactive(streamId: String)
     case invalidStream(streamId: String)
     case bufferError(message: String)
+    case invalidArgument(message: String)
     
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ enum StreamError: LocalizedError, CustomStringConvertible {
             return "ENOENT: No such stream: \(streamId)"
         case .bufferError(let message):
             return "Buffer error: \(message)"
+        case .invalidArgument(let message):
+            return "EINVAL: \(message)"
         }
     }
 

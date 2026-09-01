@@ -2,6 +2,9 @@ import Foundation
 import NitroModules
 
 class Fs2Stream: HybridFs2StreamSpec {
+  /// Mirrors MAX_STREAM_BUFFER_SIZE in src/_filestream.ts.
+  static let maxBufferSize = 16 * 1024 * 1024
+
   // MARK: - State Definitions
 
   /// Every mutable field on the two state classes below is written from the JS thread
@@ -16,7 +19,9 @@ class Fs2Stream: HybridFs2StreamSpec {
   /// critical section spans an `await`, so the background tasks cannot deadlock against the
   /// JS thread.
   private class ReadStreamState {
-    let fileHandle: FileHandle
+    /// Opened in `startReadStream`, not at create: a stream that is created and never started
+    /// would otherwise hold a descriptor for the life of the process.
+    let fileURL: URL
     let options: ReadStreamOptions?
 
     private let lock = NSLock()
@@ -26,6 +31,8 @@ class Fs2Stream: HybridFs2StreamSpec {
     private var _task: Task<Void, Never>? = nil
     private var _pauseStreamContinuation: AsyncStream<Void>.Continuation?
     private var _pauseStream: AsyncStream<Void>?
+    private var _fileHandle: FileHandle?
+    private var _closedByCaller: Bool = false
 
     private func sync<T>(_ body: () -> T) -> T {
       lock.lock()
@@ -59,8 +66,30 @@ class Fs2Stream: HybridFs2StreamSpec {
       set { sync { _pauseStream = newValue } }
     }
 
-    init(fileHandle: FileHandle, options: ReadStreamOptions?) {
-      self.fileHandle = fileHandle
+    var fileHandle: FileHandle? {
+      get { sync { _fileHandle } }
+      set { sync { _fileHandle = newValue } }
+    }
+    /// Atomic test-and-set. Two concurrent `start()` calls both passing an
+    /// `if isActive` check would launch two read loops over one descriptor, so every
+    /// reported position would be wrong and only the second task would be cancellable.
+    func tryActivate() -> Bool {
+      sync {
+        if _isActive { return false }
+        _isActive = true
+        _isPaused = false
+        return true
+      }
+    }
+
+    /// Distinguishes "reached EOF" from "the caller closed us" on the end event.
+    var closedByCaller: Bool {
+      get { sync { _closedByCaller } }
+      set { sync { _closedByCaller = newValue } }
+    }
+
+    init(fileURL: URL, options: ReadStreamOptions?) {
+      self.fileURL = fileURL
       self.options = options
     }
   }
@@ -169,11 +198,11 @@ class Fs2Stream: HybridFs2StreamSpec {
       guard FileManager.default.fileExists(atPath: fileURL.path) else {
         throw StreamError.notFound(path: path)
       }
-      guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
+      guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
         throw StreamError.accessDenied(path: path)
       }
       let streamId = UUID().uuidString
-      let state = ReadStreamState(fileHandle: fileHandle, options: options)
+      let state = ReadStreamState(fileURL: fileURL, options: options)
       self.withRegistry { self.readStreams[streamId] = state }
       return ReadStreamHandle(streamId: streamId)
     }
@@ -218,6 +247,8 @@ class Fs2Stream: HybridFs2StreamSpec {
           return
         }
 
+        var hadError = false
+
         do {
           for await (data, _) in stream {
             try state.fileHandle.write(contentsOf: data)
@@ -236,12 +267,14 @@ class Fs2Stream: HybridFs2StreamSpec {
 
           }
         } catch {
+          hadError = true
           self.withRegistry { self.writeStreamErrorListeners[streamId] }?(WriteStreamErrorEvent(
             streamId: streamId,
             error: StreamError.ioError(message: error.localizedDescription).errorDescription ?? "Unknown error",
             code: nil
           ))
           state.isActive = false
+          state.writeBufferContinuation?.finish() // nothing will drain the queue now
         }
 
         // Cleanup: remove from map, sync and close file, emit finish event, cleanup listeners
@@ -252,7 +285,7 @@ class Fs2Stream: HybridFs2StreamSpec {
         self.withRegistry { self.writeStreamFinishListeners[streamId] }?(WriteStreamFinishEvent(
           streamId: streamId,
           bytesWritten: state.position,
-          success: true
+          success: !hadError
         ))
 
         self.withRegistry { _ = self.writeStreamProgressListeners.removeValue(forKey: streamId) }
@@ -271,19 +304,40 @@ class Fs2Stream: HybridFs2StreamSpec {
         throw StreamError.invalidStream(streamId: streamId)
       }
 
-      if state.isActive { return }
+      // Before any conversion: `Int(_: Double)` traps, and `UInt64(start)` traps on negatives.
+      let requestedBufferSize = state.options?.bufferSize ?? Double(BufferPool.defaultBufferSize)
+      guard requestedBufferSize.isFinite,
+            requestedBufferSize >= 1,
+            requestedBufferSize <= Double(Self.maxBufferSize),
+            let bufferSize = Int(exactly: requestedBufferSize.rounded(.down)) else {
+        throw StreamError.invalidArgument(
+          message: "bufferSize must be between 1 and \(Self.maxBufferSize), got \(requestedBufferSize)")
+      }
 
-      state.isActive = true
-      state.isPaused = false
-
-      let bufferSize = Int(state.options?.bufferSize ?? Double(BufferPool.defaultBufferSize))
       let start = state.options?.start ?? 0
       let end = state.options?.end
+      guard start >= 0 else {
+        throw StreamError.invalidArgument(message: "start must be non-negative, got \(start)")
+      }
+      if let end = end, end < start {
+        throw StreamError.invalidArgument(
+          message: "end (\(end)) must not be before start (\(start))")
+      }
+
+      // Claim the stream before opening, so a losing racer neither leaks a descriptor nor
+      // launches a second loop.
+      guard state.tryActivate() else { return }
+
+      guard let fileHandle = try? FileHandle(forReadingFrom: state.fileURL) else {
+        state.isActive = false
+        throw StreamError.accessDenied(path: state.fileURL.path)
+      }
+      state.fileHandle = fileHandle
       var position = start
       var chunk: Int64 = 0
-      let fileLengthUInt = (try? state.fileHandle.seekToEnd()) ?? 0
+      let fileLengthUInt = (try? fileHandle.seekToEnd()) ?? 0
       let fileLength = fileLengthUInt > UInt64(Int64.max) ? Int64.max : Int64(fileLengthUInt)
-      try? state.fileHandle.seek(toOffset: UInt64(start))
+      try? fileHandle.seek(toOffset: UInt64(start))
       state.position = start
 
       // Setup AsyncStream for pausing/resuming
@@ -319,8 +373,9 @@ class Fs2Stream: HybridFs2StreamSpec {
 
             let bytesRead = try buffer.withUnsafeMutableBytes { bufferPtr -> Int in
               guard let baseAddress = bufferPtr.baseAddress else { return 0 }
-              let fd = state.fileHandle.fileDescriptor
-              let result = Darwin.read(fd, baseAddress, bytesToRead)
+              let fd = fileHandle.fileDescriptor
+              // Clamp to the buffer we got, not the size we asked for.
+              let result = Darwin.read(fd, baseAddress, min(bytesToRead, bufferPtr.count))
               guard result >= 0 else {
                 throw StreamError.ioError(message: String(cString: strerror(errno)))
               }
@@ -361,7 +416,7 @@ class Fs2Stream: HybridFs2StreamSpec {
           self.withRegistry { self.readStreamEndListeners[streamId] }?(ReadStreamEndEvent(
             streamId: streamId,
             bytesRead: bytesReadTotal,
-            success: true
+            success: !state.closedByCaller
           ))
         } catch {
           self.withRegistry { self.readStreamErrorListeners[streamId] }?(ReadStreamErrorEvent(
@@ -376,7 +431,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
         // Only cleanup if stream wasn't already removed by closeReadStream
         if self.withRegistry({ self.readStreams.removeValue(forKey: streamId) }) != nil {
-          try? state.fileHandle.close()
+          try? state.fileHandle?.close()
           self.withRegistry { _ = self.readStreamDataListeners.removeValue(forKey: streamId) }
           self.withRegistry { _ = self.readStreamProgressListeners.removeValue(forKey: streamId) }
           self.withRegistry { _ = self.readStreamEndListeners.removeValue(forKey: streamId) }
@@ -432,6 +487,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
 
       // Cancel and wait for task to finish before closing file handle
+      state.closedByCaller = true
       state.isActive = false
       // Unblocks a reader parked in the pause handshake. Task cancellation alone would
       // usually end the `for await`, but finishing the stream makes it deterministic.
@@ -442,7 +498,7 @@ class Fs2Stream: HybridFs2StreamSpec {
         _ = await task.result
       }
 
-      try? state.fileHandle.close()
+      try? state.fileHandle?.close()
 
       // Cleanup listeners (task's finally block will skip this since stream was removed)
       self.withRegistry { _ = self.readStreamDataListeners.removeValue(forKey: streamId) }
@@ -506,6 +562,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       // still buffered, silently truncating the destination: a caller whose writes had all
       // resolved still got a short file. Finish the queue and await the drain, exactly as
       // `endWriteStream` already did.
+      state.isActive = false
       state.writeBufferContinuation?.finish()
       if let task = state.task {
         _ = await task.result
@@ -544,7 +601,9 @@ class Fs2Stream: HybridFs2StreamSpec {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
       }
 
-      // Mark the stream as finished (no more writes)
+      // Before finishing: a write racing the drain would otherwise yield into a finished
+      // continuation, which silently discards it.
+      state.isActive = false
       state.writeBufferContinuation?.finish()
 
       // Wait for the background write task to finish

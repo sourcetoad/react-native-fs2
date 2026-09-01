@@ -8,8 +8,11 @@ jest.mock('react-native-nitro-modules', () => ({
 import {
   concatenateChunks,
   copyFileWithProgress,
+  createReadStream,
+  createWriteStream,
   processFileInChunks,
   readStream,
+  writeStream,
 } from '../_filestream';
 
 type DataCb = (event: {
@@ -23,6 +26,12 @@ type EndCb = (event: {
   bytesRead: bigint;
   success: boolean;
 }) => void;
+type WriteErrorEvent = { streamId: string; error: string; code?: string };
+type WriteFinishEvent = {
+  streamId: string;
+  bytesWritten: bigint;
+  success: boolean;
+};
 
 /**
  * A stand-in for the native stream layer.
@@ -38,11 +47,15 @@ function installFakeNative(content: Buffer) {
     maxWritesInFlight: 0,
     closedRead: false,
     closedWrite: false,
+    endedWrite: false,
     paused: false,
     pauseCount: 0,
     resumeCount: 0,
     data: null as DataCb | null,
     end: null as EndCb | null,
+    endSuccess: true,
+    writeError: null as ((event: WriteErrorEvent) => void) | null,
+    writeFinish: null as ((event: WriteFinishEvent) => void) | null,
   };
 
   mockNitro.createReadStream = jest.fn(async (_path: string, options: any) => {
@@ -66,8 +79,22 @@ function installFakeNative(content: Buffer) {
   mockNitro.listenToReadStreamError = jest.fn(() => () => {});
   mockNitro.listenToReadStreamProgress = jest.fn(() => () => {});
   mockNitro.listenToWriteStreamProgress = jest.fn(() => () => {});
-  mockNitro.listenToWriteStreamFinish = jest.fn(() => () => {});
-  mockNitro.listenToWriteStreamError = jest.fn(() => () => {});
+  mockNitro.listenToWriteStreamFinish = jest.fn(
+    (_id: string, cb: (e: WriteFinishEvent) => void) => {
+      state.writeFinish = cb;
+      return () => {
+        state.writeFinish = null;
+      };
+    }
+  );
+  mockNitro.listenToWriteStreamError = jest.fn(
+    (_id: string, cb: (e: WriteErrorEvent) => void) => {
+      state.writeError = cb;
+      return () => {
+        state.writeError = null;
+      };
+    }
+  );
 
   mockNitro.pauseReadStream = jest.fn(async () => {
     state.paused = true;
@@ -83,7 +110,14 @@ function installFakeNative(content: Buffer) {
   mockNitro.closeWriteStream = jest.fn(async () => {
     state.closedWrite = true;
   });
-  mockNitro.endWriteStream = jest.fn(async () => {});
+  mockNitro.endWriteStream = jest.fn(async () => {
+    state.endedWrite = true;
+    state.writeFinish?.({
+      streamId: 'write-1',
+      bytesWritten: BigInt(state.writes.reduce((n, b) => n + b.length, 0)),
+      success: true,
+    });
+  });
 
   mockNitro.writeToStream = jest.fn(async (_id: string, data: ArrayBuffer) => {
     state.writesInFlight += 1;
@@ -114,7 +148,7 @@ function installFakeNative(content: Buffer) {
     state.end?.({
       streamId: 'read-1',
       bytesRead: BigInt(content.length),
-      success: true,
+      success: state.endSuccess,
     });
   });
 
@@ -282,5 +316,298 @@ describe('processFileInChunks', () => {
     ).rejects.toThrow('boom');
 
     expect(state.closedRead).toBe(true);
+  });
+});
+
+describe('failure propagation', () => {
+  it('copyFileWithProgress rejects when the write stream errors', async () => {
+    // The read side still ends cleanly, so only the write-error channel reports this.
+    const state = installFakeNative(Buffer.from('abcdef', 'utf8'));
+    mockNitro.writeToStream = jest.fn(async () => {
+      state.writeError?.({
+        streamId: 'write-1',
+        error: 'ENOSPC: No space left on device',
+      });
+    });
+
+    await expect(
+      copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 3 })
+    ).rejects.toThrow('ENOSPC');
+  });
+
+  it('copyFileWithProgress rejects when the write finishes unsuccessfully', async () => {
+    const state = installFakeNative(Buffer.from('abcdef', 'utf8'));
+    mockNitro.endWriteStream = jest.fn(async () => {
+      state.writeFinish?.({
+        streamId: 'write-1',
+        bytesWritten: BigInt(0),
+        success: false,
+      });
+    });
+    mockNitro.closeWriteStream = jest.fn(async () => {
+      state.closedWrite = true;
+      state.writeFinish?.({
+        streamId: 'write-1',
+        bytesWritten: BigInt(0),
+        success: false,
+      });
+    });
+
+    await expect(
+      copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 3 })
+    ).rejects.toThrow(/unsuccessfully|failed/i);
+  });
+
+  it('readStream rejects when the read ends unsuccessfully', async () => {
+    const state = installFakeNative(Buffer.from('abcdef', 'utf8'));
+    state.endSuccess = false;
+
+    await expect(
+      readStream('/tmp/a', 'utf8', { bufferSize: 3 })
+    ).rejects.toThrow(/unsuccessfully|failed/i);
+  });
+
+  it('processFileInChunks rejects when the read ends unsuccessfully', async () => {
+    const state = installFakeNative(Buffer.from('abcdef', 'utf8'));
+    state.endSuccess = false;
+
+    await expect(
+      processFileInChunks('/tmp/a', () => {}, { bufferSize: 3 })
+    ).rejects.toThrow(/unsuccessfully|failed/i);
+  });
+
+  it('writeStream rejects when the write finishes unsuccessfully', async () => {
+    const state = installFakeNative(Buffer.from('', 'utf8'));
+    mockNitro.endWriteStream = jest.fn(async () => {
+      state.endedWrite = true;
+      state.writeFinish?.({
+        streamId: 'write-1',
+        bytesWritten: BigInt(0),
+        success: false,
+      });
+    });
+
+    await expect(writeStream('/tmp/a', 'hello', 'utf8')).rejects.toThrow(
+      /unsuccessfully|failed/i
+    );
+  });
+});
+
+describe('writeStream cleanup', () => {
+  it('closes the native stream when encoding throws', async () => {
+    const state = installFakeNative(Buffer.from('', 'utf8'));
+
+    await expect(
+      // A lone surrogate cannot be encoded.
+      writeStream('/tmp/a', '\uD800', 'ascii-not-a-real-encoding' as never)
+    ).rejects.toThrow();
+
+    expect(state.closedWrite || state.endedWrite).toBe(true);
+  });
+
+  it('closes the native stream when the write rejects', async () => {
+    const state = installFakeNative(Buffer.from('', 'utf8'));
+    mockNitro.writeToStream = jest.fn(async () => {
+      throw new Error('EIO: device failure');
+    });
+
+    await expect(writeStream('/tmp/a', 'hello', 'utf8')).rejects.toThrow('EIO');
+
+    expect(state.closedWrite || state.endedWrite).toBe(true);
+  });
+});
+
+describe('stream option validation', () => {
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['fractional', 1.5],
+    ['absurdly large', 1e12],
+  ])('createReadStream rejects a %s bufferSize', async (_label, bufferSize) => {
+    installFakeNative(Buffer.from('abc', 'utf8'));
+
+    await expect(
+      createReadStream('/tmp/a', { bufferSize: bufferSize as number })
+    ).rejects.toThrow(/bufferSize/i);
+  });
+
+  it('createWriteStream rejects a zero bufferSize', async () => {
+    installFakeNative(Buffer.from('', 'utf8'));
+
+    await expect(
+      createWriteStream('/tmp/a', { bufferSize: 0 })
+    ).rejects.toThrow(/bufferSize/i);
+  });
+
+  it('createReadStream rejects a negative start', async () => {
+    installFakeNative(Buffer.from('abc', 'utf8'));
+
+    await expect(createReadStream('/tmp/a', { start: -1 })).rejects.toThrow(
+      /start/i
+    );
+  });
+
+  it('createReadStream rejects an end before the start', async () => {
+    installFakeNative(Buffer.from('abc', 'utf8'));
+
+    await expect(
+      createReadStream('/tmp/a', { start: 10, end: 4 })
+    ).rejects.toThrow(/end/i);
+  });
+
+  it('accepts a valid bufferSize and range', async () => {
+    const state = installFakeNative(Buffer.from('abcdef', 'utf8'));
+
+    await createReadStream('/tmp/a', { bufferSize: 4, start: 1, end: 4 });
+
+    expect(state.requestedBufferSize).toBe(4);
+  });
+});
+
+describe('processFileInChunks back-pressure', () => {
+  /** Unlike the default fake, this one actually stops emitting while paused. */
+  function installPauseHonouringNative(content: Buffer) {
+    const state = installFakeNative(content);
+    mockNitro.startReadStream = jest.fn(async () => {
+      const size = state.requestedBufferSize ?? 8192;
+      let chunk = 0;
+      for (let offset = 0; offset < content.length; offset += size) {
+        while (state.paused) {
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        state.data?.({
+          streamId: 'read-1',
+          data: new Uint8Array(content.subarray(offset, offset + size)).buffer,
+          chunk: BigInt(chunk),
+          position: BigInt(offset),
+        });
+        chunk += 1;
+      }
+      state.end?.({
+        streamId: 'read-1',
+        bytesRead: BigInt(content.length),
+        success: state.endSuccess,
+      });
+    });
+    return state;
+  }
+
+  it('pauses the reader when the processor falls behind', async () => {
+    const state = installPauseHonouringNative(
+      Buffer.from('x'.repeat(40), 'utf8')
+    );
+
+    await processFileInChunks(
+      '/tmp/a',
+      async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      },
+      { bufferSize: 1 }
+    );
+
+    expect(state.pauseCount).toBeGreaterThan(0);
+    expect(state.resumeCount).toBeGreaterThan(0);
+  });
+
+  it('still processes every chunk in order while pausing', async () => {
+    const state = installPauseHonouringNative(
+      Buffer.from('abcdefghij', 'utf8')
+    );
+    const seen: number[] = [];
+
+    await processFileInChunks(
+      '/tmp/a',
+      async (_chunk, index) => {
+        await new Promise((r) => setTimeout(r, 0));
+        seen.push(index);
+      },
+      { bufferSize: 1 }
+    );
+
+    expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(state.closedRead).toBe(true);
+  });
+});
+
+describe('pause/resume ordering', () => {
+  /**
+   * Native applies pause and resume as independent async operations with no mutual ordering,
+   * so if JS lets them overlap they can land in the opposite order — the resume no-ops and
+   * the late pause parks the reader with nothing left to wake it.
+   */
+  function installOverlapTrackingNative(content: Buffer) {
+    const state = installFakeNative(content);
+    // Writer is the bottleneck, so the watermark is actually reached.
+    mockNitro.writeToStream = jest.fn(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    let pauseInFlight = 0;
+    const overlaps = { count: 0 };
+
+    mockNitro.pauseReadStream = jest.fn(async () => {
+      state.pauseCount += 1;
+      pauseInFlight += 1;
+      await new Promise((r) => setTimeout(r, 100));
+      state.paused = true;
+      pauseInFlight -= 1;
+    });
+    mockNitro.resumeReadStream = jest.fn(async () => {
+      state.resumeCount += 1;
+      if (pauseInFlight > 0) overlaps.count += 1;
+      state.paused = false;
+    });
+    mockNitro.startReadStream = jest.fn(async () => {
+      const size = state.requestedBufferSize ?? 8192;
+      let chunk = 0;
+      for (let offset = 0; offset < content.length; offset += size) {
+        await new Promise((r) => setTimeout(r, 1));
+        while (state.paused) {
+          await new Promise((r) => setTimeout(r, 1));
+        }
+        state.data?.({
+          streamId: 'read-1',
+          data: new Uint8Array(content.subarray(offset, offset + size)).buffer,
+          chunk: BigInt(chunk),
+          position: BigInt(offset),
+        });
+        chunk += 1;
+      }
+      state.end?.({
+        streamId: 'read-1',
+        bytesRead: BigInt(content.length),
+        success: state.endSuccess,
+      });
+    });
+    return { state, overlaps };
+  }
+
+  it('copyFileWithProgress never resumes while a pause is in flight', async () => {
+    const { state, overlaps } = installOverlapTrackingNative(
+      Buffer.from('x'.repeat(100), 'utf8')
+    );
+
+    await copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 1 });
+
+    expect(state.pauseCount).toBeGreaterThan(0); // guard: the test must not be vacuous
+    expect(overlaps.count).toBe(0);
+  });
+
+  it('processFileInChunks never resumes while a pause is in flight', async () => {
+    const { state, overlaps } = installOverlapTrackingNative(
+      Buffer.from('x'.repeat(100), 'utf8')
+    );
+
+    await processFileInChunks(
+      '/tmp/a',
+      async () => {
+        await new Promise((r) => setTimeout(r, 5));
+      },
+      { bufferSize: 1 }
+    );
+
+    expect(state.pauseCount).toBeGreaterThan(0); // guard: the test must not be vacuous
+    expect(overlaps.count).toBe(0);
   });
 });

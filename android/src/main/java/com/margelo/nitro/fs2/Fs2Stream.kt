@@ -20,26 +20,33 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.UUID
 
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.channels.Channel
 
 class Fs2Stream() : HybridFs2StreamSpec() {
+    private companion object {
+        /** Mirrors MAX_STREAM_BUFFER_SIZE in src/_filestream.ts and maxBufferSize in Fs2Stream.swift. */
+        const val MAX_BUFFER_SIZE = 16.0 * 1024 * 1024
+    }
+
     // Stream state data classes
+    /** [isPaused] is separate from [isActive], which means "not closed" - as on iOS. */
     private data class ReadStreamState(
         val file: File,
         val options: ReadStreamOptions?,
-        var isActive: Boolean = false,
-        var position: Long = 0L,
+        @Volatile var isActive: Boolean = false,
+        @Volatile var isPaused: Boolean = false,
+        @Volatile var position: Long = 0L,
         var job: Job? = null,
-        val pauseMutex: kotlinx.coroutines.sync.Mutex = kotlinx.coroutines.sync.Mutex(locked = false) // Unlocked = active, Locked = paused
+        val resumeSignal: Channel<Unit> = Channel(Channel.CONFLATED)
     )
 
     private data class WriteStreamState(
         val file: File,
         val options: WriteStreamOptions?,
-        var isActive: Boolean = false,
-        var position: Long = 0L,
+        @Volatile var isActive: Boolean = false,
+        @Volatile var position: Long = 0L,
         var job: Job? = null,
-        var hasError: Boolean = false
+        @Volatile var hasError: Boolean = false
     )
 
     // Stream handle maps
@@ -233,15 +240,39 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         return Promise.async {
             val state =
                 readStreams[streamId] ?: throw StreamError.InvalidStream(streamId)
-            if (state.isActive) return@async
-            state.isActive = true
+            // Atomic claim: two concurrent start() calls must not both launch a read loop.
+            synchronized(state) {
+                if (state.isActive) return@async
+                state.isActive = true
+                state.isPaused = false
+            }
 
             // Only create new job if none exists or previous one is completed
             if (state.job == null || state.job?.isActive == false) {
                 state.job = streamScope.launch {
-                    val bufferSize = state.options?.bufferSize ?: BufferPool.DEFAULT_BUFFER_SIZE
+                    val requestedBufferSize: Double =
+                        state.options?.bufferSize ?: BufferPool.DEFAULT_BUFFER_SIZE.toDouble()
                     val start = state.options?.start ?: 0L
                     val end = state.options?.end
+                    // A huge value raises OutOfMemoryError, which the catch ladder below
+                    // cannot catch; 0 spins the loop forever.
+                    if (!requestedBufferSize.isFinite() || requestedBufferSize < 1.0 ||
+                        requestedBufferSize > MAX_BUFFER_SIZE
+                    ) {
+                        throw StreamError.InvalidArgument(
+                            "bufferSize must be between 1 and ${MAX_BUFFER_SIZE.toLong()}, " +
+                                "got $requestedBufferSize"
+                        )
+                    }
+                    val bufferSize: Int = requestedBufferSize.toInt()
+                    if (start < 0L) {
+                        throw StreamError.InvalidArgument("start must be non-negative, got $start")
+                    }
+                    if (end != null && end < start) {
+                        throw StreamError.InvalidArgument(
+                            "end ($end) must not be before start ($start)"
+                        )
+                    }
                     var position = start
                     var chunk = 0L
                     val fileLength = state.file.length()
@@ -251,11 +282,14 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                         openInputStream(state.file.path, start).use { inputStream ->
                             var buffer = bufferPool.acquire(bufferSize.toInt())
                             try {
-                                readLoop@ while (true) {
-                                    // Wait if paused - acquire lock briefly to check, then suspend if needed
-                                    state.pauseMutex.withLock {
-                                        // Just checking pause state, lock will be released after this block
+                                readLoop@ while (state.isActive) {
+                                    ensureActive() // a suspension point, so close() is observed
+
+                                    // CONFLATED: a resume arriving before we park is retained.
+                                    while (state.isPaused && state.isActive) {
+                                        state.resumeSignal.receive()
                                     }
+                                    if (!state.isActive) break@readLoop
 
                                     // Perform I/O without holding the lock
                                     val bytesToRead = if (end != null) {
@@ -265,7 +299,8 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                     } else bufferSize.toInt()
 
                                     val read = inputStream.read(buffer, 0, bytesToRead)
-                                    if (read == -1) break@readLoop
+                                    // `<= 0`, not `== -1`: read() may legally return 0.
+                                    if (read <= 0) break@readLoop
 
                                     val data = buffer.copyOf(read)
 
@@ -288,7 +323,9 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                             streamId = streamId,
                                             bytesRead = bytesReadTotal,
                                             totalBytes = fileLength,
-                                            progress = bytesReadTotal.toDouble() / fileLength.toDouble()
+                                            progress = if (fileLength > 0)
+                                                bytesReadTotal.toDouble() / fileLength.toDouble()
+                                            else 0.0
                                         )
                                     )
 
@@ -355,9 +392,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                 readStreams[streamId] ?: throw FsError("ENOENT: No such read stream: $streamId")
             if (!state.isActive) return@async
 
-            // Use tryLock to avoid deadlock - locks mutex to pause stream
-            state.pauseMutex.tryLock()
-            state.isActive = false
+            state.isPaused = true
         }
     }
 
@@ -365,17 +400,10 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         return Promise.async {
             val state =
                 readStreams[streamId] ?: throw FsError("ENOENT: No such read stream: $streamId")
-            if (state.isActive) return@async
+            if (!state.isActive) return@async
 
-            // Safely unlock mutex to resume stream - check if locked first
-            if (state.pauseMutex.isLocked) {
-                try {
-                    state.pauseMutex.unlock()
-                } catch (e: IllegalStateException) {
-                    // Mutex might have been unlocked by another coroutine, ignore
-                }
-            }
-            state.isActive = true
+            state.isPaused = false
+            state.resumeSignal.trySend(Unit)
         }
     }
 
@@ -383,7 +411,21 @@ class Fs2Stream() : HybridFs2StreamSpec() {
         return Promise.async {
             val state = readStreams.remove(streamId)
                 ?: throw FsError("ENOENT: No such read stream: $streamId")
+            // Clear the flag, unpark the reader, then wait for it to actually stop.
+            state.isActive = false
+            state.isPaused = false
+            state.resumeSignal.trySend(Unit)
             state.job?.cancel()
+            state.job?.join()
+            // iOS emits an end event here too; `success = false` is what tells a caller the
+            // bytes it received are partial rather than the whole file.
+            readStreamEndListeners[streamId]?.invoke(
+                ReadStreamEndEvent(
+                    streamId = streamId,
+                    bytesRead = state.position,
+                    success = false
+                )
+            )
             readStreamDataListeners.remove(streamId)
             readStreamProgressListeners.remove(streamId)
             readStreamEndListeners.remove(streamId)

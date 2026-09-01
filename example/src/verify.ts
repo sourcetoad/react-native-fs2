@@ -1208,6 +1208,49 @@ export async function runVerification(): Promise<Report> {
     }
   );
 
+  await check(
+    'createReadStream() rejects a zero bufferSize',
+    'streaming-validation',
+    async () => {
+      // Unvalidated, this hung the Android read loop (read(b,0,0) returns 0, and the loop
+      // only broke on -1) and reported a non-empty file as empty on iOS.
+      const file = `${root}/zero-buffer.txt`;
+      await RNFS.writeFile(file, 'some real content', 'utf8');
+
+      let rejected = false;
+      let message = '';
+      try {
+        await createReadStream(file, { bufferSize: 0 });
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'accepted bufferSize: 0');
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  await check(
+    'createReadStream() rejects a negative start',
+    'streaming-validation',
+    async () => {
+      // UInt64(start) traps on iOS, aborting the process.
+      const file = `${root}/negative-start.txt`;
+      await RNFS.writeFile(file, 'some real content', 'utf8');
+
+      let rejected = false;
+      let message = '';
+      try {
+        await createReadStream(file, { start: -1 });
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'accepted start: -1');
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
   const skipped = checks.filter((c) => c.status === 'skip').length;

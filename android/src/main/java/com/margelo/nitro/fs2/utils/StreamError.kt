@@ -10,6 +10,10 @@ sealed class StreamError : JsVisibleError() {
     }
     
     data class IOError(override val message: String) : StreamError()
+
+    data class InvalidArgument(val reason: String) : StreamError() {
+        override val message: String = "EINVAL: $reason"
+    }
     
     data class StorageError(val reason: String) : StreamError() {
         override val message: String = "Storage error: $reason"
