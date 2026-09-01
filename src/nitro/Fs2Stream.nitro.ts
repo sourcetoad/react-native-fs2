@@ -95,7 +95,14 @@ export interface Fs2Stream
   // Stream Event Listeners
   listenToReadStreamData(
     streamId: string,
-    onData: (event: ReadStreamDataEvent) => void
+    /**
+     * Awaited by the native read loop before the next chunk is read - this is the read
+     * path's back-pressure. The resolved value is ignored; it is `boolean` rather than
+     * `void` because Nitro 0.37 resolves a Kotlin `Promise<Unit>` from C++ with a bare
+     * `java.lang.Object` (`JUnit::instance()`), which throws `ClassCastException` inside
+     * `JPromise::resolve` while it holds its mutex - wedging the promise for good.
+     */
+    onData: (event: ReadStreamDataEvent) => Promise<boolean>
   ): () => void;
   listenToReadStreamProgress(
     streamId: string,

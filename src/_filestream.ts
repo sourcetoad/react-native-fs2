@@ -203,12 +203,19 @@ export async function createWriteStream(
  */
 export function listenToReadStreamData(
   streamId: string,
-  onData: (event: ReadStreamDataEvent) => void
+  onData: (event: ReadStreamDataEvent) => void | Promise<void>
 ): () => void {
-  const onDataNitro = (event: ReadStreamDataEventNitro) => {
+  // `async` is load-bearing twice over. Native awaits what this returns before reading the
+  // next chunk, which is the only back-pressure the read path has; and the C++ converter
+  // calls `.then` on the returned value, so it has to be a thenable even when `onData` is
+  // synchronous.
+  const onDataNitro = async (event: ReadStreamDataEventNitro) => {
     const eventPlain = convertFs2StreamEventResultsToPlain(event);
 
-    onData(eventPlain as ReadStreamDataEvent);
+    await onData(eventPlain as ReadStreamDataEvent);
+    // The value is ignored - see the note on `onData` in Fs2Stream.nitro.ts for why this
+    // resolves to something rather than to `undefined`.
+    return true;
   };
 
   return RNFS2StreamNitro.listenToReadStreamData(streamId, onDataNitro);
@@ -407,6 +414,30 @@ export function concatenateChunks(chunks: ArrayBuffer[]): ArrayBuffer {
 }
 
 /**
+ * Like {@link concatenateChunks}, but empties `chunks` as it copies.
+ *
+ * Holding the chunk list alongside the assembled copy doubles the peak for the whole
+ * duration of the join. Dropping each reference as its bytes are copied means only the
+ * chunks not yet copied are live, so the peak is the result plus one chunk.
+ */
+function consumeChunks(chunks: ArrayBuffer[]): ArrayBuffer {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.byteLength;
+
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (let i = 0; i < chunks.length; i += 1) {
+    const chunk = chunks[i]!;
+    combined.set(new Uint8Array(chunk), offset);
+    offset += chunk.byteLength;
+    // @ts-expect-error - deliberately dropping the reference, not shortening the array.
+    chunks[i] = undefined;
+  }
+  chunks.length = 0;
+  return combined.buffer;
+}
+
+/**
  * Default chunk size for the high-level helpers, in bytes.
  *
  * Each chunk costs one JSI callback, so a small size dominates the cost of a large read:
@@ -415,12 +446,50 @@ export function concatenateChunks(chunks: ArrayBuffer[]): ArrayBuffer {
 const DEFAULT_STREAM_BUFFER_SIZE = 64 * 1024;
 
 /**
- * How many chunks may sit un-written before the read stream is paused.
- *
- * Native does not await the data callback, so without this the reader runs ahead of the
- * writer without bound.
+ * How many chunks may sit un-written before the read stream is held.
  */
 const DEFAULT_HIGH_WATER_MARK = 8;
+
+/**
+ * Bounds how far the reader may run ahead of the consumer.
+ *
+ * The data callback returns {@link admit}'s promise, and the native read loop awaits it
+ * before reading the next chunk, so the pipeline can never hold more than `highWaterMark`
+ * chunks. This replaces the older `pause()`/`resume()` pair: those are two independent
+ * async calls with no mutual ordering, so a resume landing before its pause left the reader
+ * parked with nothing to wake it.
+ */
+function createBackPressureGate(highWaterMark: number) {
+  const lowWaterMark = Math.max(1, Math.floor(highWaterMark / 2));
+  let queued = 0;
+  let waiters: Array<() => void> = [];
+
+  const drain = () => {
+    if (waiters.length === 0 || queued > lowWaterMark) return;
+    const pending = waiters;
+    waiters = [];
+    for (const resolve of pending) resolve();
+  };
+
+  return {
+    /** Records a chunk handed to the consumer, and returns the reader's leash. */
+    admit(): Promise<void> | undefined {
+      queued += 1;
+      if (queued < highWaterMark) return undefined;
+      return new Promise<void>((resolve) => waiters.push(resolve));
+    },
+    /** Records a chunk that has actually landed. */
+    release(): void {
+      queued -= 1;
+      drain();
+    },
+    /** Releases every parked reader - the stream is over, one way or the other. */
+    close(): void {
+      queued = 0;
+      drain();
+    },
+  };
+}
 
 /**
  * Closes a stream, ignoring "no such stream".
@@ -493,7 +562,7 @@ export async function readStream(
       cleanup();
       closeQuietly(stream);
 
-      const assembled = concatenateChunks(chunks);
+      const assembled = consumeChunks(chunks);
       if (encoding === 'arraybuffer') {
         resolve(assembled);
         return;
@@ -581,10 +650,10 @@ export async function writeStream(
 /**
  * Copies a file through a read stream and a write stream, reporting progress.
  *
- * Writes are serialised: native does not await the data callback, so issuing each
- * `write()` as the chunk arrives lets several be in flight at once and the destination can
- * be assembled out of order. Chunks are chained so at most one write is outstanding, and the
- * read stream is paused once more than `highWaterMark` chunks are waiting.
+ * Writes are serialised: issuing each `write()` as the chunk arrives would let several be in
+ * flight at once and the destination could be assembled out of order. Chunks are chained so
+ * at most one write is outstanding, and the data callback returns a promise that holds the
+ * native reader once more than `highWaterMark` chunks are waiting.
  *
  * @beta
  */
@@ -594,7 +663,7 @@ export async function copyFileWithProgress(
   options: {
     bufferSize?: number;
     onProgress?: (progress: number) => void;
-    /** Chunks allowed to queue before the read stream is paused. Defaults to 8. */
+    /** Chunks allowed to queue before the read stream is held. Defaults to 8. */
     highWaterMark?: number;
   } = {}
 ): Promise<void> {
@@ -608,7 +677,7 @@ export async function copyFileWithProgress(
   const writeStreamHandle = await createWriteStream(destPath, { bufferSize });
 
   return new Promise<void>((resolve, reject) => {
-    const lowWaterMark = Math.max(1, Math.floor(highWaterMark / 2));
+    const gate = createBackPressureGate(highWaterMark);
 
     let unsubscribeData: (() => void) | null = null;
     let unsubscribeProgress: (() => void) | null = null;
@@ -617,25 +686,15 @@ export async function copyFileWithProgress(
     let unsubscribeWriteError: (() => void) | null = null;
     let unsubscribeWriteFinish: (() => void) | null = null;
 
-    let queued = 0;
-    let paused = false;
     let settled = false;
     // Set during teardown, so settle() has to consult it after closing rather than before.
     let writeFailure: unknown = null;
 
-    // pause() and resume() are independent async native calls with no mutual ordering, so
-    // overlapping them can land them in the opposite order - the resume no-ops and the late
-    // pause parks the reader for good. Serialising through one chain makes that impossible.
-    // Rejections are ignored: both report an unknown stream once the loop has finished.
-    let controlChain: Promise<void> = Promise.resolve();
-    const control = (op: () => Promise<void>): Promise<void> => {
-      controlChain = controlChain.then(op).catch(() => {});
-      return controlChain;
-    };
     // Serialises writes: each chunk waits for the previous one to land.
     let writeChain: Promise<void> = Promise.resolve();
 
     const cleanup = () => {
+      gate.close();
       unsubscribeData?.();
       unsubscribeProgress?.();
       unsubscribeEnd?.();
@@ -673,26 +732,22 @@ export async function copyFileWithProgress(
       (event) => {
         if (settled) return;
 
-        queued += 1;
-        if (!paused && queued >= highWaterMark) {
-          paused = true;
-          control(() => readStreamHandle.pause());
-        }
+        const admitted = gate.admit();
 
         writeChain = writeChain
           .then(async () => {
             if (settled) return;
             await writeStreamHandle.write(event.data);
-            queued -= 1;
-
-            if (paused && queued <= lowWaterMark) {
-              paused = false;
-              await control(() => readStreamHandle.resume());
-            }
           })
-          .catch((error) => {
-            settle(error);
-          });
+          .then(
+            () => gate.release(),
+            (error) => {
+              gate.release();
+              settle(error);
+            }
+          );
+
+        return admitted;
       }
     );
 
@@ -752,7 +807,8 @@ export async function copyFileWithProgress(
  * Reads a file through a stream, handing each chunk to `chunkProcessor`.
  *
  * The processor is awaited before the next chunk is handed over, so chunks are always
- * processed in order even though native does not await the data callback.
+ * processed in order, and the reader is held once more than `highWaterMark` chunks are
+ * waiting on it.
  *
  * @beta
  */
@@ -764,7 +820,7 @@ export async function processFileInChunks(
     position: number
   ) => Promise<void> | void,
   options: ReadStreamOptions & {
-    /** Chunks allowed to queue before the read stream is paused. Defaults to 8. */
+    /** Chunks allowed to queue before the read stream is held. Defaults to 8. */
     highWaterMark?: number;
   } = {}
 ): Promise<void> {
@@ -774,26 +830,18 @@ export async function processFileInChunks(
     ...readOptions,
   });
 
-  const lowWaterMark = Math.max(1, Math.floor(highWaterMark / 2));
-
   return new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let queued = 0;
-    let paused = false;
-    let processChain: Promise<void> = Promise.resolve();
+    const gate = createBackPressureGate(highWaterMark);
 
-    // See copyFileWithProgress: pause and resume must never be in flight together.
-    let controlChain: Promise<void> = Promise.resolve();
-    const control = (op: () => Promise<void>): Promise<void> => {
-      controlChain = controlChain.then(op).catch(() => {});
-      return controlChain;
-    };
+    let settled = false;
+    let processChain: Promise<void> = Promise.resolve();
 
     let unsubscribeData: (() => void) | null = null;
     let unsubscribeEnd: (() => void) | null = null;
     let unsubscribeError: (() => void) | null = null;
 
     const cleanup = () => {
+      gate.close();
       unsubscribeData?.();
       unsubscribeEnd?.();
       unsubscribeError?.();
@@ -811,28 +859,23 @@ export async function processFileInChunks(
     unsubscribeData = listenToReadStreamData(stream.streamId, (event) => {
       if (settled) return;
 
-      // Awaiting the processor orders chunks but does not slow the reader; only pausing does.
-      queued += 1;
-      if (!paused && queued >= highWaterMark) {
-        paused = true;
-        control(() => stream.pause());
-      }
+      // Chaining orders the chunks; returning `admitted` is what slows the reader down.
+      const admitted = gate.admit();
 
       processChain = processChain
         .then(async () => {
           if (settled) return;
           await chunkProcessor(event.data, event.chunk, event.position);
         })
-        .then(async () => {
-          queued -= 1;
-          if (paused && queued <= lowWaterMark) {
-            paused = false;
-            await control(() => stream.resume());
+        .then(
+          () => gate.release(),
+          (error) => {
+            gate.release();
+            settle(error);
           }
-        })
-        .catch((error) => {
-          settle(error);
-        });
+        );
+
+      return admitted;
     });
 
     unsubscribeEnd = listenToReadStreamEnd(stream.streamId, (event) => {

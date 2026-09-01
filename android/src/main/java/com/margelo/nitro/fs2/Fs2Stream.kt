@@ -4,7 +4,6 @@ import com.margelo.nitro.NitroModules
 import com.margelo.nitro.core.Promise
 import com.margelo.nitro.core.ArrayBuffer
 import com.margelo.nitro.fs2.utils.Fs2Util
-import com.margelo.nitro.fs2.utils.BufferPool
 import com.margelo.nitro.fs2.utils.StreamError
 import com.margelo.nitro.fs2.utils.FsError
 
@@ -26,6 +25,12 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     private companion object {
         /** Mirrors MAX_STREAM_BUFFER_SIZE in src/_filestream.ts and maxBufferSize in Fs2Stream.swift. */
         const val MAX_BUFFER_SIZE = 16.0 * 1024 * 1024
+
+        /**
+         * Mirrors DEFAULT_STREAM_BUFFER_SIZE in src/_filestream.ts, so a handle created
+         * without options reads in the same chunks the high-level helpers ask for.
+         */
+        const val DEFAULT_BUFFER_SIZE = 64 * 1024
     }
 
     // Stream state data classes
@@ -57,7 +62,8 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     private val streamScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Event listener maps (for demonstration, not yet emitting events)
-    private val readStreamDataListeners = ConcurrentHashMap<String, (ReadStreamDataEvent) -> Unit>()
+    private val readStreamDataListeners =
+        ConcurrentHashMap<String, (ReadStreamDataEvent) -> Promise<Promise<Boolean>>>()
     private val readStreamProgressListeners =
         ConcurrentHashMap<String, (ReadStreamProgressEvent) -> Unit>()
     private val readStreamEndListeners = ConcurrentHashMap<String, (ReadStreamEndEvent) -> Unit>()
@@ -81,8 +87,101 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     private val reactContext = NitroModules.applicationContext
         ?: throw Error("No Context available!")
 
-    // Add buffer pool instance
-    private val bufferPool = BufferPool()
+    /**
+     * Hands [event] to the JS consumer and waits for it to finish with the chunk.
+     *
+     * The JS callback is declared as returning `Promise<boolean>`, which Nitro delivers here
+     * as a `Promise<Promise<Boolean>>`: the outer one resolves once the callback has run on
+     * the JS thread, the inner one once the promise it returned settles. The value is ignored
+     * - it is not `void` because Nitro 0.37 resolves a Kotlin `Promise<Unit>` from C++ with a
+     * bare `java.lang.Object`, which throws `ClassCastException` inside `JPromise::resolve`
+     * while it holds its mutex, wedging the promise for good. Awaiting both is the whole of
+     * the read path's back-pressure. Without it the loop reads at disk speed while every chunk
+     * piles up as an owning copy in the dispatcher's unbounded queue, so peak memory tracks the
+     * file size rather than the buffer size.
+     *
+     * The wait goes through a [CompletableDeferred] rather than `Promise.await()`, which is
+     * built on a plain `suspendCoroutine` and so ignores cancellation - a consumer that never
+     * settles would park the loop on an open descriptor for the life of the process.
+     */
+    private suspend fun deliver(
+        listener: (ReadStreamDataEvent) -> Promise<Promise<Boolean>>,
+        event: ReadStreamDataEvent
+    ) {
+        val ack = CompletableDeferred<Unit>()
+        listener(event)
+            .then { inner ->
+                inner
+                    .then { ack.complete(Unit) }
+                    .catch { error -> ack.completeExceptionally(error) }
+            }
+            .catch { error -> ack.completeExceptionally(error) }
+        ack.await()
+    }
+
+    /**
+     * Bytes allowed to sit in the write queue at once - `WriteStreamOptions.bufferSize`.
+     *
+     * This is what makes `writeToStream`'s promise a real back-pressure signal. It used to
+     * resolve the moment the chunk was accepted into a no-arg [LinkedBlockingQueue], capacity
+     * `Integer.MAX_VALUE`, so a producer faster than the disk grew native memory without limit
+     * while every `await` returned immediately.
+     */
+    private class WriteBudget(private val capacity: Int) {
+        private val waiters = ArrayDeque<Pair<Int, CompletableDeferred<Unit>>>()
+        private var pending = 0
+        private var closed = false
+
+        /**
+         * Suspends until [bytes] fit within [capacity], then charges them to the queue.
+         * A chunk larger than the whole budget is admitted on its own rather than waiting for
+         * room that can never appear.
+         */
+        suspend fun reserve(bytes: Int) {
+            val gate = synchronized(this) {
+                val fits = pending == 0 || pending + bytes <= capacity
+                if (closed || (waiters.isEmpty() && fits)) {
+                    pending += bytes
+                    return
+                }
+                CompletableDeferred<Unit>().also { waiters.addLast(bytes to it) }
+            }
+            gate.await()
+        }
+
+        /** Returns [bytes] to the budget and admits whoever now fits, in arrival order. */
+        fun release(bytes: Int) {
+            val admitted = synchronized(this) {
+                pending -= bytes
+                val ready = mutableListOf<CompletableDeferred<Unit>>()
+                while (waiters.isNotEmpty()) {
+                    val (needed, gate) = waiters.first()
+                    if (pending != 0 && pending + needed > capacity) break
+                    waiters.removeFirst()
+                    pending += needed
+                    ready += gate
+                }
+                ready
+            }
+            admitted.forEach { it.complete(Unit) }
+        }
+
+        /**
+         * Admits everyone still waiting. Nothing will drain the queue after this, so a waiter
+         * left parked would be a `write()` that never settles; each one then fails the
+         * inactive-stream check instead.
+         */
+        fun close() {
+            val waiting = synchronized(this) {
+                closed = true
+                val all = waiters.toList()
+                waiters.clear()
+                all.forEach { pending += it.first }
+                all
+            }
+            waiting.forEach { it.second.complete(Unit) }
+        }
+    }
 
     // Helper to open InputStream for reading (file or content URI)
     private fun openInputStream(path: String, start: Long = 0L): InputStream {
@@ -167,11 +266,23 @@ class Fs2Stream() : HybridFs2StreamSpec() {
             if (options?.createDirectories == true) {
                 file.parentFile?.mkdirs()
             }
+            val requestedCapacity: Double =
+                options?.bufferSize ?: DEFAULT_BUFFER_SIZE.toDouble()
+            if (!requestedCapacity.isFinite() || requestedCapacity < 1.0 ||
+                requestedCapacity > MAX_BUFFER_SIZE
+            ) {
+                throw StreamError.InvalidArgument(
+                    "bufferSize must be between 1 and ${MAX_BUFFER_SIZE.toLong()}, " +
+                        "got $requestedCapacity"
+                )
+            }
             val streamId = UUID.randomUUID().toString()
             val outputStream = openOutputStream(path, options?.append == true)
             val queue = LinkedBlockingQueue<WriteRequest>()
             val state = WriteStreamState(file, options, isActive = true)
-            val impl = WriteStreamStateImpl(state, outputStream, queue)
+            val impl = WriteStreamStateImpl(
+                state, outputStream, queue, WriteBudget(requestedCapacity.toInt())
+            )
             writeStreams[streamId] = impl
             impl.state.job = streamScope.launch {
                 var bytesWritten = 0L
@@ -180,16 +291,20 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                         val req = impl.queue.take()
                         if (req.isEnd) break@writeLoop
                         req.data?.let { data ->
-                            impl.outputStream.write(data)
-                            impl.state.position += data.size
-                            bytesWritten += data.size
-                            writeStreamProgressListeners[streamId]?.invoke(
-                                WriteStreamProgressEvent(
-                                    streamId = streamId,
-                                    bytesWritten = bytesWritten,
-                                    lastChunkSize = data.size.toLong()
+                            try {
+                                impl.outputStream.write(data)
+                                impl.state.position += data.size
+                                bytesWritten += data.size
+                                writeStreamProgressListeners[streamId]?.invoke(
+                                    WriteStreamProgressEvent(
+                                        streamId = streamId,
+                                        bytesWritten = bytesWritten,
+                                        lastChunkSize = data.size.toLong()
+                                    )
                                 )
-                            )
+                            } finally {
+                                impl.budget.release(data.size)
+                            }
                         }
                     }
                 } catch (e: SecurityException) {
@@ -229,6 +344,8 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     } catch (_: Exception) {
                     }
                     impl.state.isActive = false
+                    // Nothing will drain the queue from here on.
+                    impl.budget.close()
                 }
             }
             return@async WriteStreamHandle(streamId)
@@ -251,7 +368,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
             if (state.job == null || state.job?.isActive == false) {
                 state.job = streamScope.launch {
                     val requestedBufferSize: Double =
-                        state.options?.bufferSize ?: BufferPool.DEFAULT_BUFFER_SIZE.toDouble()
+                        state.options?.bufferSize ?: DEFAULT_BUFFER_SIZE.toDouble()
                     val start = state.options?.start ?: 0L
                     val end = state.options?.end
                     // A huge value raises OutOfMemoryError, which the catch ladder below
@@ -280,31 +397,37 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     try {
                         state.position = position
                         openInputStream(state.file.path, start).use { inputStream ->
-                            var buffer = bufferPool.acquire(bufferSize.toInt())
-                            try {
-                                readLoop@ while (state.isActive) {
-                                    ensureActive() // a suspension point, so close() is observed
+                            // One buffer for the whole stream, sized exactly. The pool this
+                            // replaced bucketed at 8 KB, so a default-configured stream missed
+                            // it on `acquire` and was rejected on `release`, and it handed back
+                            // recycled buffers without scrubbing them.
+                            val buffer = ByteArray(bufferSize)
+                            readLoop@ while (state.isActive) {
+                                ensureActive() // a suspension point, so close() is observed
 
-                                    // CONFLATED: a resume arriving before we park is retained.
-                                    while (state.isPaused && state.isActive) {
-                                        state.resumeSignal.receive()
-                                    }
-                                    if (!state.isActive) break@readLoop
+                                // CONFLATED: a resume arriving before we park is retained.
+                                while (state.isPaused && state.isActive) {
+                                    state.resumeSignal.receive()
+                                }
+                                if (!state.isActive) break@readLoop
 
-                                    // Perform I/O without holding the lock
-                                    val bytesToRead = if (end != null) {
-                                        val remaining = end - position + 1
-                                        if (remaining <= 0) break@readLoop
-                                        minOf(bufferSize.toLong(), remaining).toInt()
-                                    } else bufferSize.toInt()
+                                // Perform I/O without holding the lock
+                                val bytesToRead = if (end != null) {
+                                    val remaining = end - position + 1
+                                    if (remaining <= 0) break@readLoop
+                                    minOf(bufferSize.toLong(), remaining).toInt()
+                                } else bufferSize.toInt()
 
-                                    val read = inputStream.read(buffer, 0, bytesToRead)
-                                    // `<= 0`, not `== -1`: read() may legally return 0.
-                                    if (read <= 0) break@readLoop
+                                val read = inputStream.read(buffer, 0, bytesToRead)
+                                // `<= 0`, not `== -1`: read() may legally return 0.
+                                if (read <= 0) break@readLoop
 
-                                    val data = buffer.copyOf(read)
+                                val data = buffer.copyOf(read)
 
-                                    readStreamDataListeners[streamId]?.invoke(
+                                val listener = readStreamDataListeners[streamId]
+                                if (listener != null) {
+                                    deliver(
+                                        listener,
                                         ReadStreamDataEvent(
                                             streamId = streamId,
                                             data = ArrayBuffer.copy(java.nio.ByteBuffer.wrap(data)),
@@ -312,27 +435,25 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                             position = position
                                         )
                                     )
-
-                                    position += read
-                                    state.position = position
-                                    bytesReadTotal += read
-                                    chunk++
-
-                                    readStreamProgressListeners[streamId]?.invoke(
-                                        ReadStreamProgressEvent(
-                                            streamId = streamId,
-                                            bytesRead = bytesReadTotal,
-                                            totalBytes = fileLength,
-                                            progress = if (fileLength > 0)
-                                                bytesReadTotal.toDouble() / fileLength.toDouble()
-                                            else 0.0
-                                        )
-                                    )
-
-                                    if (end != null && position > end) break@readLoop
                                 }
-                            } finally {
-                                bufferPool.release(buffer)
+
+                                position += read
+                                state.position = position
+                                bytesReadTotal += read
+                                chunk++
+
+                                readStreamProgressListeners[streamId]?.invoke(
+                                    ReadStreamProgressEvent(
+                                        streamId = streamId,
+                                        bytesRead = bytesReadTotal,
+                                        totalBytes = fileLength,
+                                        progress = if (fileLength > 0)
+                                            bytesReadTotal.toDouble() / fileLength.toDouble()
+                                        else 0.0
+                                    )
+                                )
+
+                                if (end != null && position > end) break@readLoop
                             }
                         }
                         readStreamEndListeners[streamId]?.invoke(
@@ -342,6 +463,10 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                                 success = true
                             )
                         )
+                    } catch (e: CancellationException) {
+                        // close() cancels the job; closeReadStream emits the end event itself,
+                        // so an error event here would be a lie about why the read stopped.
+                        throw e
                     } catch (e: SecurityException) {
                         val error = StreamError.AccessDenied(state.file.path)
                         readStreamErrorListeners[streamId]?.invoke(
@@ -375,11 +500,14 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                     } finally {
                         state.isActive = false
                         state.job = null
-                        readStreams.remove(streamId)
-                        readStreamDataListeners.remove(streamId)
-                        readStreamProgressListeners.remove(streamId)
-                        readStreamEndListeners.remove(streamId)
-                        readStreamErrorListeners.remove(streamId)
+                        // closeReadStream removes the stream first and emits the end event
+                        // after joining; clearing the listeners here would drop it.
+                        if (readStreams.remove(streamId) != null) {
+                            readStreamDataListeners.remove(streamId)
+                            readStreamProgressListeners.remove(streamId)
+                            readStreamEndListeners.remove(streamId)
+                            readStreamErrorListeners.remove(streamId)
+                        }
                     }
                 }
             }
@@ -462,6 +590,13 @@ class Fs2Stream() : HybridFs2StreamSpec() {
                 } else {
                     ByteArray(buf.remaining()).also { buf.get(it) }
                 }
+            }
+            // Suspends while the queue is full: this promise resolving is the caller's signal
+            // that there is room, which is what `bufferSize` now bounds.
+            impl.budget.reserve(bytes.size)
+            if (!impl.state.isActive) {
+                impl.budget.release(bytes.size)
+                throw StreamError.StreamInactive(streamId)
             }
             impl.queue.add(WriteRequest(bytes))
             impl.state.job?.let { if (!it.isActive) throw StreamError.StreamInactive(streamId) }
@@ -565,7 +700,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     // --- Event Listener Registration ---
     override fun listenToReadStreamData(
         streamId: String,
-        onData: (event: ReadStreamDataEvent) -> Unit
+        onData: (event: ReadStreamDataEvent) -> Promise<Promise<Boolean>>
     ): () -> Unit {
         readStreamDataListeners[streamId] = onData
         return { readStreamDataListeners.remove(streamId) }
@@ -623,6 +758,7 @@ class Fs2Stream() : HybridFs2StreamSpec() {
     private class WriteStreamStateImpl(
         val state: WriteStreamState,
         val outputStream: OutputStream,
-        val queue: BlockingQueue<WriteRequest>
+        val queue: BlockingQueue<WriteRequest>,
+        val budget: WriteBudget
     )
 }

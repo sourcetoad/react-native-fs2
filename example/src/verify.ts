@@ -16,6 +16,7 @@ import RNFS, {
   createWriteStream,
   listenToReadStreamData,
   listenToReadStreamEnd,
+  listenToReadStreamError,
   listenToWriteStreamProgress,
   processFileInChunks,
   readStream,
@@ -793,7 +794,9 @@ export async function runVerification(): Promise<Report> {
       const stream = await createReadStream(file, { start: 10, end: 19 });
       const parts: ArrayBuffer[] = [];
       const done = new Promise<void>((resolve) => {
-        listenToReadStreamData(stream.streamId, (e) => parts.push(e.data));
+        listenToReadStreamData(stream.streamId, (e) => {
+          parts.push(e.data);
+        });
         listenToReadStreamEnd(stream.streamId, () => resolve());
       });
       await stream.start();
@@ -907,6 +910,254 @@ export async function runVerification(): Promise<Report> {
       record(name, guards, 'fail', e?.message ?? String(e));
     }
   }
+
+  // A1: the read loop awaits what the data callback returns. Nothing else in this file
+  // exercises that - `pause()` above tests the older, separate mechanism.
+  {
+    const name = 'an async data listener holds the read loop';
+    const guards = 'streaming-backpressure';
+    try {
+      const file = `${root}/stream-backpressure.txt`;
+      const payload = 'b'.repeat(1024 * 1024);
+      await RNFS.writeFile(file, payload, 'utf8');
+      const totalChunks = Math.ceil(payload.length / 1024);
+
+      const stream = await createReadStream(file, { bufferSize: 1024 });
+      let chunks = 0;
+      let ended = false;
+      let release: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      listenToReadStreamData(stream.streamId, async () => {
+        chunks += 1;
+        // Hold on the first chunk only; every later one returns immediately.
+        if (chunks === 1) await held;
+      });
+      listenToReadStreamEnd(stream.streamId, () => {
+        ended = true;
+      });
+
+      const started = stream.start();
+      await delay(600);
+      const whileHeld = chunks;
+
+      if (ended) {
+        record(
+          name,
+          guards,
+          'fail',
+          `stream reached the end (${chunks}/${totalChunks} chunks) while the first chunk's ` +
+            'listener had not resolved - the read loop is not awaiting the data callback'
+        );
+        release();
+      } else {
+        assert(
+          whileHeld <= 2,
+          `read ran on to ${whileHeld}/${totalChunks} chunks while the listener was held`
+        );
+        release();
+        const finished = new Promise<void>((resolve) => {
+          listenToReadStreamEnd(stream.streamId, () => resolve());
+        });
+        await withTimeout(started, 30000, 'start');
+        await withTimeout(finished, 30000, 'drain after release');
+        assert(
+          chunks === totalChunks,
+          `expected ${totalChunks} chunks after release, got ${chunks}`
+        );
+        record(
+          name,
+          guards,
+          'pass',
+          `held at ${whileHeld}/${totalChunks} chunks, drained to ${chunks} once released`
+        );
+      }
+    } catch (e: any) {
+      record(name, guards, 'fail', e?.message ?? String(e));
+    }
+  }
+
+  await check(
+    'a throwing data listener fails the read stream',
+    'streaming-backpressure',
+    async () => {
+      const file = `${root}/stream-listener-throw.txt`;
+      await RNFS.writeFile(file, 'x'.repeat(8192), 'utf8');
+
+      const stream = await createReadStream(file, { bufferSize: 1024 });
+      let errorMessage: string | null = null;
+      const settled = new Promise<void>((resolve) => {
+        listenToReadStreamData(stream.streamId, () => {
+          throw new Error('listener exploded');
+        });
+        listenToReadStreamError(stream.streamId, (e) => {
+          errorMessage = e.error;
+          resolve();
+        });
+        listenToReadStreamEnd(stream.streamId, () => resolve());
+      });
+
+      await stream.start().catch(() => {});
+      await withTimeout(settled, 10000, 'listener throw');
+      await stream.close().catch(() => {});
+
+      assert(
+        errorMessage !== null,
+        'a data listener that throws produced no read-stream error event'
+      );
+      return `surfaced as a read-stream error: ${errorMessage}`;
+    }
+  );
+
+  // A2/A3: `bufferSize` bounds the write queue, and `write()` resolves when there is room.
+  // The assertion is causal rather than timed: the second write cannot resolve until the
+  // first has actually been written, which is what the progress event reports.
+  await check(
+    'write() waits for room in the bufferSize budget',
+    'streaming-backpressure',
+    async () => {
+      const file = `${root}/stream-write-budget.bin`;
+      const chunk = new Uint8Array(4096).fill(7).buffer;
+      const stream = await createWriteStream(file, { bufferSize: 4096 });
+
+      const order: string[] = [];
+      listenToWriteStreamProgress(stream.streamId, () => {
+        order.push('written');
+      });
+
+      // Awaited, so it is definitely the one holding the budget when the next one asks.
+      await stream.write(chunk);
+      const second = stream.write(chunk).then(() => order.push('second'));
+      await withTimeout(second, 15000, 'budgeted write');
+      await stream.end();
+
+      const firstWrite = order.indexOf('written');
+      const secondResolved = order.indexOf('second');
+      assert(
+        firstWrite !== -1 && secondResolved > firstWrite,
+        `second write() resolved before the first landed: ${order.join(' -> ')}`
+      );
+
+      const size = (await RNFS.stat(file)).size;
+      assert(Number(size) === 8192, `expected 8192 bytes on disk, got ${size}`);
+      return `order was ${order.join(' -> ')}, 8192 bytes on disk`;
+    }
+  );
+
+  // The hang-shaped path A1 introduced: close() has to release a read loop that is parked on
+  // the JS consumer. `Promise.await()` is non-cancellable on both platforms, so if the
+  // interrupt is wrong this does not fail - it never returns.
+  await check(
+    'close() releases a read loop parked on its consumer',
+    'streaming-backpressure',
+    async () => {
+      const file = `${root}/stream-close-parked.txt`;
+      await RNFS.writeFile(file, 'c'.repeat(512 * 1024), 'utf8');
+
+      const stream = await createReadStream(file, { bufferSize: 1024 });
+      let chunks = 0;
+      let endEvent: { bytesRead: number; success: boolean } | null = null;
+      let release: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      listenToReadStreamData(stream.streamId, async () => {
+        chunks += 1;
+        if (chunks === 1) await held;
+      });
+      listenToReadStreamEnd(stream.streamId, (e) => {
+        endEvent = e;
+      });
+
+      stream.start().catch(() => {});
+      // Long enough for the reader to reach the first chunk and park on it.
+      for (let i = 0; i < 100 && chunks === 0; i++) await delay(10);
+      assert(chunks > 0, 'no chunk was delivered, so the reader never parked');
+
+      await withTimeout(stream.close(), 15000, 'close() while parked');
+      release();
+      await delay(200);
+
+      const held2 = chunks;
+      assert(
+        endEvent !== null,
+        "close() during an active read produced no end event - on Android the job's " +
+          'finally used to clear the listener before close() could emit'
+      );
+      assert(
+        endEvent!.success === false,
+        `end event reported success: true after close() at chunk ${held2}`
+      );
+      return (
+        `closed while parked at chunk ${held2}, end reported ` +
+        `success=false bytesRead=${endEvent!.bytesRead}`
+      );
+    }
+  );
+
+  // The budget admits an oversized chunk on its own rather than waiting for room that can
+  // never appear. Get that wrong and this deadlocks instead of failing.
+  await check(
+    'a chunk larger than bufferSize is still written',
+    'streaming-backpressure',
+    async () => {
+      const file = `${root}/stream-oversized.bin`;
+      const stream = await createWriteStream(file, { bufferSize: 1024 });
+      const big = new Uint8Array(64 * 1024).fill(3).buffer;
+
+      await withTimeout(stream.write(big), 15000, 'oversized write');
+      await withTimeout(stream.end(), 15000, 'end after oversized write');
+
+      const size = Number((await RNFS.stat(file)).size);
+      assert(size === 65536, `expected 65536 bytes on disk, got ${size}`);
+      return '64 KB chunk written through a 1 KB budget';
+    }
+  );
+
+  // Ending the stream has to admit anyone still waiting for room, or their write() never
+  // settles. Resolving and rejecting are both acceptable; hanging is not.
+  await check(
+    'a write parked on a full budget settles when the stream ends',
+    'streaming-backpressure',
+    async () => {
+      const file = `${root}/stream-parked-write.bin`;
+      const stream = await createWriteStream(file, { bufferSize: 4096 });
+      const chunk = new Uint8Array(4096).fill(9).buffer;
+
+      await stream.write(chunk);
+      const parked = stream
+        .write(chunk)
+        .then(() => 'resolved')
+        .catch(() => 'rejected');
+
+      await withTimeout(stream.end(), 15000, 'end with a parked write');
+      const outcome = await withTimeout(parked, 15000, 'parked write');
+      return `parked write ${outcome} rather than hanging`;
+    }
+  );
+
+  await check(
+    'createWriteStream() rejects a zero bufferSize',
+    'streaming-validation',
+    async () => {
+      // `bufferSize` is now the write queue's byte budget, so 0 would admit nothing.
+      let rejected = false;
+      let message = '';
+      try {
+        await createWriteStream(`${root}/zero-write-buffer.bin`, {
+          bufferSize: 0,
+        });
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'accepted bufferSize: 0 on a write stream');
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
 
   await check(
     'createWriteStream() appends when asked',

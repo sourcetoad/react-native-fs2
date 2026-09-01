@@ -10,6 +10,7 @@ import {
   copyFileWithProgress,
   createReadStream,
   createWriteStream,
+  listenToReadStreamData,
   processFileInChunks,
   readStream,
   writeStream,
@@ -20,7 +21,7 @@ type DataCb = (event: {
   data: ArrayBuffer;
   chunk: bigint;
   position: bigint;
-}) => void;
+}) => Promise<void>;
 type EndCb = (event: {
   streamId: string;
   bytesRead: bigint;
@@ -54,6 +55,9 @@ function installFakeNative(content: Buffer) {
     data: null as DataCb | null,
     end: null as EndCb | null,
     endSuccess: true,
+    readError: null as
+      | ((event: { streamId: string; error: string }) => void)
+      | null,
     writeError: null as ((event: WriteErrorEvent) => void) | null,
     writeFinish: null as ((event: WriteFinishEvent) => void) | null,
   };
@@ -76,7 +80,14 @@ function installFakeNative(content: Buffer) {
       state.end = null;
     };
   });
-  mockNitro.listenToReadStreamError = jest.fn(() => () => {});
+  mockNitro.listenToReadStreamError = jest.fn(
+    (_id: string, cb: (e: { streamId: string; error: string }) => void) => {
+      state.readError = cb;
+      return () => {
+        state.readError = null;
+      };
+    }
+  );
   mockNitro.listenToReadStreamProgress = jest.fn(() => () => {});
   mockNitro.listenToWriteStreamProgress = jest.fn(() => () => {});
   mockNitro.listenToWriteStreamFinish = jest.fn(
@@ -254,18 +265,6 @@ describe('copyFileWithProgress', () => {
     expect(Buffer.concat(state.writes).equals(bytes)).toBe(true);
   });
 
-  it('pauses the read stream once the queue exceeds the high-water mark', async () => {
-    const bytes = Buffer.alloc(500, 1);
-    const state = installFakeNative(bytes);
-
-    await copyFileWithProgress('/tmp/a', '/tmp/b', {
-      bufferSize: 10,
-      highWaterMark: 4,
-    });
-
-    expect(state.pauseCount).toBeGreaterThan(0);
-  });
-
   it('closes both streams', async () => {
     const state = installFakeNative(Buffer.from('hello', 'utf8'));
 
@@ -319,6 +318,18 @@ describe('processFileInChunks', () => {
   });
 });
 
+/**
+ * True if `p` has not settled yet. The data callback always returns a thenable — the wrapper
+ * is `async` — so truthiness proves nothing about whether the reader is actually held.
+ * A macrotask loses to any already-settled microtask chain, which is what makes this reliable.
+ */
+function stillPending(p: Promise<unknown>): Promise<boolean> {
+  return Promise.race([
+    p.then(() => false),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 0)),
+  ]);
+}
+
 describe('failure propagation', () => {
   it('copyFileWithProgress rejects when the write stream errors', async () => {
     // The read side still ends cleanly, so only the write-error channel reports this.
@@ -356,6 +367,96 @@ describe('failure propagation', () => {
     await expect(
       copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 3 })
     ).rejects.toThrow(/unsuccessfully|failed/i);
+  });
+
+  it('copyFileWithProgress rejects when write() itself rejects', async () => {
+    // Distinct from the write-*event* channel above: this is the promise `writeToStream`
+    // returns, which now rejects on a full queue or a stream closed underneath the caller.
+    installFakeNative(Buffer.from('abcdef', 'utf8'));
+    mockNitro.writeToStream = jest.fn(async () => {
+      throw new Error('EPIPE: Write stream is not active');
+    });
+
+    await expect(
+      copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 3 })
+    ).rejects.toThrow('EPIPE');
+  });
+
+  /**
+   * The reader is held by an unresolved promise, so whatever settles the helper has to
+   * release it. If it does not, the native read loop parks on an open descriptor for the
+   * life of the process — the hang that back-pressure buys at the cost of a leash.
+   */
+  it('releases a reader parked at the high-water mark when the copy fails', async () => {
+    const state = installFakeNative(Buffer.alloc(40, 1));
+    // Writes never settle, so the gate fills and stays full.
+    mockNitro.writeToStream = jest.fn(() => new Promise<void>(() => {}));
+
+    let parked = false;
+    let parkedReleased = false;
+    mockNitro.startReadStream = jest.fn(async () => {
+      for (let offset = 0; offset < 40; offset += 10) {
+        const leash = state.data!({
+          streamId: 'read-1',
+          data: new Uint8Array(10).buffer,
+          chunk: BigInt(offset / 10),
+          position: BigInt(offset),
+        });
+        if (!(await stillPending(leash))) continue;
+
+        // The reader is genuinely held. Failing the stream is the only thing that can
+        // release it, and if nothing does, this await never returns.
+        parked = true;
+        state.readError?.({ streamId: 'read-1', error: 'EIO: device failure' });
+        await leash;
+        parkedReleased = true;
+        return;
+      }
+    });
+
+    await expect(
+      copyFileWithProgress('/tmp/a', '/tmp/b', {
+        bufferSize: 10,
+        highWaterMark: 2,
+      })
+    ).rejects.toThrow('EIO');
+    expect(parked).toBe(true); // guard: the test must not be vacuous
+    expect(parkedReleased).toBe(true);
+  });
+
+  it('releases a reader parked in processFileInChunks when it fails', async () => {
+    const state = installFakeNative(Buffer.alloc(40, 1));
+
+    let parked = false;
+    let parkedReleased = false;
+    mockNitro.startReadStream = jest.fn(async () => {
+      for (let offset = 0; offset < 40; offset += 10) {
+        const leash = state.data!({
+          streamId: 'read-1',
+          data: new Uint8Array(10).buffer,
+          chunk: BigInt(offset / 10),
+          position: BigInt(offset),
+        });
+        if (!(await stillPending(leash))) continue;
+
+        // The reader is genuinely held. Failing the stream is the only thing that can
+        // release it, and if nothing does, this await never returns.
+        parked = true;
+        state.readError?.({ streamId: 'read-1', error: 'EIO: device failure' });
+        await leash;
+        parkedReleased = true;
+        return;
+      }
+    });
+
+    await expect(
+      processFileInChunks('/tmp/a', () => new Promise<void>(() => {}), {
+        bufferSize: 10,
+        highWaterMark: 2,
+      })
+    ).rejects.toThrow('EIO');
+    expect(parked).toBe(true); // guard: the test must not be vacuous
+    expect(parkedReleased).toBe(true);
   });
 
   it('readStream rejects when the read ends unsuccessfully', async () => {
@@ -467,17 +568,14 @@ describe('stream option validation', () => {
 });
 
 describe('processFileInChunks back-pressure', () => {
-  /** Unlike the default fake, this one actually stops emitting while paused. */
-  function installPauseHonouringNative(content: Buffer) {
+  /** Awaits the data callback, as the native read loop does. */
+  function installAwaitingNative(content: Buffer) {
     const state = installFakeNative(content);
     mockNitro.startReadStream = jest.fn(async () => {
       const size = state.requestedBufferSize ?? 8192;
       let chunk = 0;
       for (let offset = 0; offset < content.length; offset += size) {
-        while (state.paused) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
-        state.data?.({
+        await state.data?.({
           streamId: 'read-1',
           data: new Uint8Array(content.subarray(offset, offset + size)).buffer,
           chunk: BigInt(chunk),
@@ -494,27 +592,8 @@ describe('processFileInChunks back-pressure', () => {
     return state;
   }
 
-  it('pauses the reader when the processor falls behind', async () => {
-    const state = installPauseHonouringNative(
-      Buffer.from('x'.repeat(40), 'utf8')
-    );
-
-    await processFileInChunks(
-      '/tmp/a',
-      async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      },
-      { bufferSize: 1 }
-    );
-
-    expect(state.pauseCount).toBeGreaterThan(0);
-    expect(state.resumeCount).toBeGreaterThan(0);
-  });
-
-  it('still processes every chunk in order while pausing', async () => {
-    const state = installPauseHonouringNative(
-      Buffer.from('abcdefghij', 'utf8')
-    );
+  it('processes every chunk in order while holding the reader', async () => {
+    const state = installAwaitingNative(Buffer.from('abcdefghij', 'utf8'));
     const seen: number[] = [];
 
     await processFileInChunks(
@@ -523,50 +602,74 @@ describe('processFileInChunks back-pressure', () => {
         await new Promise((r) => setTimeout(r, 0));
         seen.push(index);
       },
-      { bufferSize: 1 }
+      { bufferSize: 1, highWaterMark: 2 }
     );
 
     expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(state.closedRead).toBe(true);
   });
+
+  /**
+   * pause() and resume() are independent async native calls with no mutual ordering, so a
+   * resume landing before its pause used to park the reader with nothing left to wake it.
+   * Back-pressure now rides on the data callback's return value, which cannot reorder
+   * against itself - so the helpers must not reach for pause/resume at all.
+   */
+  it('never drives pause or resume', async () => {
+    const state = installAwaitingNative(Buffer.from('x'.repeat(40), 'utf8'));
+
+    await processFileInChunks(
+      '/tmp/a',
+      async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      },
+      { bufferSize: 1, highWaterMark: 2 }
+    );
+
+    expect(state.pauseCount).toBe(0);
+    expect(state.resumeCount).toBe(0);
+  });
+
+  it('copyFileWithProgress never drives pause or resume either', async () => {
+    const state = installAwaitingNative(Buffer.from('x'.repeat(40), 'utf8'));
+
+    await copyFileWithProgress('/tmp/a', '/tmp/b', {
+      bufferSize: 1,
+      highWaterMark: 2,
+    });
+
+    expect(state.pauseCount).toBe(0);
+    expect(state.resumeCount).toBe(0);
+  });
 });
 
-describe('pause/resume ordering', () => {
+describe('read-path back-pressure', () => {
   /**
-   * Native applies pause and resume as independent async operations with no mutual ordering,
-   * so if JS lets them overlap they can land in the opposite order — the resume no-ops and
-   * the late pause parks the reader with nothing left to wake it.
+   * The default fake fires every chunk without waiting, exactly as the old native loops did.
+   * This one awaits the promise the data callback returns, which is the contract the
+   * `Promise<void>` return type in `Fs2Stream.nitro.ts` gives the native read loops.
    */
-  function installOverlapTrackingNative(content: Buffer) {
+  function installAwaitingNative(content: Buffer) {
     const state = installFakeNative(content);
-    // Writer is the bottleneck, so the watermark is actually reached.
-    mockNitro.writeToStream = jest.fn(async () => {
-      await new Promise((r) => setTimeout(r, 5));
-    });
-    let pauseInFlight = 0;
-    const overlaps = { count: 0 };
+    // Chunks handed to JS but not yet written or processed.
+    const depth = { current: 0, max: 0 };
 
-    mockNitro.pauseReadStream = jest.fn(async () => {
-      state.pauseCount += 1;
-      pauseInFlight += 1;
-      await new Promise((r) => setTimeout(r, 100));
-      state.paused = true;
-      pauseInFlight -= 1;
-    });
-    mockNitro.resumeReadStream = jest.fn(async () => {
-      state.resumeCount += 1;
-      if (pauseInFlight > 0) overlaps.count += 1;
-      state.paused = false;
-    });
+    mockNitro.writeToStream = jest.fn(
+      async (_id: string, data: ArrayBuffer) => {
+        // Writer is the bottleneck, so the reader would run away without back-pressure.
+        await new Promise((r) => setTimeout(r, 1));
+        state.writes.push(Buffer.from(new Uint8Array(data)));
+        depth.current -= 1;
+      }
+    );
+
     mockNitro.startReadStream = jest.fn(async () => {
       const size = state.requestedBufferSize ?? 8192;
       let chunk = 0;
       for (let offset = 0; offset < content.length; offset += size) {
-        await new Promise((r) => setTimeout(r, 1));
-        while (state.paused) {
-          await new Promise((r) => setTimeout(r, 1));
-        }
-        state.data?.({
+        depth.current += 1;
+        depth.max = Math.max(depth.max, depth.current);
+        await state.data?.({
           streamId: 'read-1',
           data: new Uint8Array(content.subarray(offset, offset + size)).buffer,
           chunk: BigInt(chunk),
@@ -580,34 +683,112 @@ describe('pause/resume ordering', () => {
         success: state.endSuccess,
       });
     });
-    return { state, overlaps };
+
+    return { state, depth };
   }
 
-  it('copyFileWithProgress never resumes while a pause is in flight', async () => {
-    const { state, overlaps } = installOverlapTrackingNative(
-      Buffer.from('x'.repeat(100), 'utf8')
-    );
+  it('hands native a data callback that returns a thenable', async () => {
+    installFakeNative(Buffer.from('hi', 'utf8'));
+    const stream = await createReadStream('/tmp/a');
+    listenToReadStreamData(stream.streamId, () => {});
 
-    await copyFileWithProgress('/tmp/a', '/tmp/b', { bufferSize: 1 });
+    const registered = mockNitro.listenToReadStreamData.mock.calls.at(-1)[1];
+    const returned = registered({
+      streamId: 'read-1',
+      data: new Uint8Array([1]).buffer,
+      chunk: BigInt(0),
+      position: BigInt(0),
+    });
 
-    expect(state.pauseCount).toBeGreaterThan(0); // guard: the test must not be vacuous
-    expect(overlaps.count).toBe(0);
+    expect(typeof returned?.then).toBe('function');
+    await returned;
   });
 
-  it('processFileInChunks never resumes while a pause is in flight', async () => {
-    const { state, overlaps } = installOverlapTrackingNative(
-      Buffer.from('x'.repeat(100), 'utf8')
-    );
+  it('propagates a listener rejection to native rather than swallowing it', async () => {
+    installFakeNative(Buffer.from('hi', 'utf8'));
+    const stream = await createReadStream('/tmp/a');
+    listenToReadStreamData(stream.streamId, () => {
+      throw new Error('consumer exploded');
+    });
+
+    const registered = mockNitro.listenToReadStreamData.mock.calls.at(-1)[1];
+
+    await expect(
+      registered({
+        streamId: 'read-1',
+        data: new Uint8Array([1]).buffer,
+        chunk: BigInt(0),
+        position: BigInt(0),
+      })
+    ).rejects.toThrow('consumer exploded');
+  });
+
+  it('holds copyFileWithProgress at the high-water mark', async () => {
+    const { state, depth } = installAwaitingNative(Buffer.alloc(200, 1));
+
+    await copyFileWithProgress('/tmp/a', '/tmp/b', {
+      bufferSize: 10,
+      highWaterMark: 4,
+    });
+
+    expect(depth.max).toBeLessThanOrEqual(4);
+    expect(depth.max).toBeGreaterThan(1); // guard: pipelining is not collapsed to depth 1
+    expect(Buffer.concat(state.writes).length).toBe(200);
+  });
+
+  it('holds processFileInChunks at the high-water mark', async () => {
+    const { depth } = installAwaitingNative(Buffer.alloc(200, 1));
+    let processed = 0;
 
     await processFileInChunks(
       '/tmp/a',
       async () => {
-        await new Promise((r) => setTimeout(r, 5));
+        await new Promise((r) => setTimeout(r, 1));
+        depth.current -= 1;
+        processed += 1;
       },
-      { bufferSize: 1 }
+      { bufferSize: 10, highWaterMark: 4 }
     );
 
-    expect(state.pauseCount).toBeGreaterThan(0); // guard: the test must not be vacuous
-    expect(overlaps.count).toBe(0);
+    expect(depth.max).toBeLessThanOrEqual(4);
+    expect(depth.max).toBeGreaterThan(1); // guard: pipelining is not collapsed to depth 1
+    expect(processed).toBe(20);
+  });
+
+  it('still delivers every chunk when native ignores the returned promise', async () => {
+    const bytes = Buffer.from(Array.from({ length: 300 }, (_, i) => i % 256));
+    const state = installFakeNative(bytes);
+
+    await copyFileWithProgress('/tmp/a', '/tmp/b', {
+      bufferSize: 10,
+      highWaterMark: 4,
+    });
+
+    expect(Buffer.concat(state.writes).equals(bytes)).toBe(true);
+  });
+});
+
+describe('readStream memory', () => {
+  // The chunk list is dropped as it is copied (`consumeChunks`), which halves the peak but is
+  // not observable from here - this guards that the destructive join still assembles in order.
+  it('assembles the result correctly from a destructively consumed chunk list', async () => {
+    const bytes = Buffer.from(Array.from({ length: 300 }, (_, i) => i % 256));
+    const state = installFakeNative(bytes);
+    const delivered: ArrayBuffer[] = [];
+    const realListen = mockNitro.listenToReadStreamData;
+    mockNitro.listenToReadStreamData = jest.fn((id: string, cb: DataCb) =>
+      realListen(id, async (event: Parameters<DataCb>[0]) => {
+        delivered.push(event.data);
+        return cb(event);
+      })
+    );
+
+    const result = (await readStream('/tmp/x.bin', 'arraybuffer', {
+      bufferSize: 10,
+    })) as ArrayBuffer;
+
+    expect(Buffer.from(new Uint8Array(result)).equals(bytes)).toBe(true);
+    expect(delivered.length).toBe(30);
+    expect(state.closedRead).toBe(true);
   });
 });

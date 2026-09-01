@@ -5,6 +5,10 @@ class Fs2Stream: HybridFs2StreamSpec {
   /// Mirrors MAX_STREAM_BUFFER_SIZE in src/_filestream.ts.
   static let maxBufferSize = 16 * 1024 * 1024
 
+  /// Mirrors DEFAULT_STREAM_BUFFER_SIZE in src/_filestream.ts, so a handle created without
+  /// options reads in the same chunks the high-level helpers ask for.
+  static let defaultBufferSize = 64 * 1024
+
   // MARK: - State Definitions
 
   /// Every mutable field on the two state classes below is written from the JS thread
@@ -33,6 +37,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     private var _pauseStream: AsyncStream<Void>?
     private var _fileHandle: FileHandle?
     private var _closedByCaller: Bool = false
+    private var _ackContinuation: AsyncStream<Error?>.Continuation?
 
     private func sync<T>(_ body: () -> T) -> T {
       lock.lock()
@@ -87,6 +92,12 @@ class Fs2Stream: HybridFs2StreamSpec {
       get { sync { _closedByCaller } }
       set { sync { _closedByCaller = newValue } }
     }
+    /// Set while the read loop is waiting for the JS consumer. `closeReadStream` finishes it
+    /// to release a loop whose consumer never answers.
+    var ackContinuation: AsyncStream<Error?>.Continuation? {
+      get { sync { _ackContinuation } }
+      set { sync { _ackContinuation = newValue } }
+    }
 
     init(fileURL: URL, options: ReadStreamOptions?) {
       self.fileURL = fileURL
@@ -98,6 +109,8 @@ class Fs2Stream: HybridFs2StreamSpec {
     let fileHandle: FileHandle
     let options: WriteStreamOptions?
     let queue = DispatchQueue(label: "com.margelo.nitro.fs2.writequeue")
+    /// Bytes allowed to sit in the write queue at once - `WriteStreamOptions.bufferSize`.
+    let capacity: Int
 
     private let lock = NSLock()
     private var _isActive: Bool = false
@@ -106,6 +119,9 @@ class Fs2Stream: HybridFs2StreamSpec {
     private var _writeBufferContinuation: AsyncStream<(Data, Bool)>.Continuation?
     private var _writeBufferStream: AsyncStream<(Data, Bool)>?
     private var _shouldFlush: Bool = false
+    private var _pendingBytes: Int = 0
+    private var _spaceWaiters: [(bytes: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private var _budgetClosed: Bool = false
 
     private func sync<T>(_ body: () -> T) -> T {
       lock.lock()
@@ -142,9 +158,62 @@ class Fs2Stream: HybridFs2StreamSpec {
       set { sync { _shouldFlush = newValue } }
     }
 
-    init(fileHandle: FileHandle, options: WriteStreamOptions?) {
+    /// Suspends until `bytes` fit within `capacity`, then charges them to the queue.
+    ///
+    /// This is what makes `writeToStream`'s promise a real back-pressure signal. It used to
+    /// resolve the moment the chunk was accepted into an unbounded `AsyncStream`, so a
+    /// producer faster than the disk grew native memory without limit while every `await`
+    /// returned immediately.
+    ///
+    /// A chunk larger than the whole budget is admitted on its own rather than waiting for
+    /// room that can never appear.
+    func reserve(_ bytes: Int) async {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        lock.lock()
+        let fits = _pendingBytes == 0 || _pendingBytes + bytes <= capacity
+        if _budgetClosed || (_spaceWaiters.isEmpty && fits) {
+          _pendingBytes += bytes
+          lock.unlock()
+          continuation.resume()
+          return
+        }
+        _spaceWaiters.append((bytes, continuation))
+        lock.unlock()
+      }
+    }
+
+    /// Returns `bytes` to the budget and admits whoever now fits, in arrival order.
+    func release(_ bytes: Int) {
+      lock.lock()
+      _pendingBytes -= bytes
+      var admitted: [CheckedContinuation<Void, Never>] = []
+      while let next = _spaceWaiters.first,
+            _pendingBytes == 0 || _pendingBytes + next.bytes <= capacity {
+        _spaceWaiters.removeFirst()
+        _pendingBytes += next.bytes
+        admitted.append(next.continuation)
+      }
+      lock.unlock()
+      for continuation in admitted { continuation.resume() }
+    }
+
+    /// Admits everyone still waiting. Nothing will drain the queue after this, so a waiter
+    /// left parked would be a `write()` that never settles; each one then fails on the
+    /// finished continuation instead.
+    func closeBudget() {
+      lock.lock()
+      _budgetClosed = true
+      let waiting = _spaceWaiters
+      _spaceWaiters.removeAll()
+      for waiter in waiting { _pendingBytes += waiter.bytes }
+      lock.unlock()
+      for waiter in waiting { waiter.continuation.resume() }
+    }
+
+    init(fileHandle: FileHandle, options: WriteStreamOptions?, capacity: Int) {
       self.fileHandle = fileHandle
       self.options = options
+      self.capacity = capacity
     }
   }
 
@@ -155,8 +224,7 @@ class Fs2Stream: HybridFs2StreamSpec {
   /// The registries are written from the JS thread (`listenTo*`, `createReadStream`,
   /// `close*`) and read from the background `Task`s that drive the read and write loops.
   /// A Swift `Dictionary` is not safe under concurrent access - it can corrupt its storage,
-  /// not merely return a stale value. `BufferPool` in this module already guards its state
-  /// the same way; the maps were simply missed. Android has always used `ConcurrentHashMap`.
+  /// not merely return a stale value. Android has always used `ConcurrentHashMap`.
   ///
   /// Listener closures are looked up *under* the lock and invoked *outside* it - see
   /// `listener(_:)`. Never `await` inside `withRegistry`: `NSLock` is not reentrant and is
@@ -166,13 +234,9 @@ class Fs2Stream: HybridFs2StreamSpec {
   private var readStreams: [String: ReadStreamState] = [:]
   private var writeStreams: [String: WriteStreamState] = [:]
 
-  // MARK: - Buffer Pool
-
-  private let bufferPool = BufferPool()
-
   // MARK: - Event Listener Maps
 
-  private var readStreamDataListeners: [String: (ReadStreamDataEvent) -> Void] = [:]
+  private var readStreamDataListeners: [String: (ReadStreamDataEvent) -> Promise<Promise<Bool>>] = [:]
   private var readStreamProgressListeners: [String: (ReadStreamProgressEvent) -> Void] = [:]
   private var readStreamEndListeners: [String: (ReadStreamEndEvent) -> Void] = [:]
   private var readStreamErrorListeners: [String: (ReadStreamErrorEvent) -> Void] = [:]
@@ -188,6 +252,57 @@ class Fs2Stream: HybridFs2StreamSpec {
     registryLock.lock()
     defer { registryLock.unlock() }
     return body()
+  }
+
+  // MARK: - Chunk Delivery
+
+  /// Hands `event` to the JS consumer and waits for it to finish with the chunk.
+  ///
+  /// The JS callback is declared as returning `Promise<boolean>`, which Nitro delivers here as
+  /// a `Promise<Promise<Bool>>`: the outer one resolves once the callback has run on the JS
+  /// thread, the inner one once the promise it returned settles. The value is ignored - see
+  /// `Fs2Stream.nitro.ts` for why it is not `void`. Awaiting both is the whole of
+  /// the read path's back-pressure. Without it the loop reads at disk speed while every chunk
+  /// piles up as an owning copy in the dispatcher's unbounded queue, so peak memory tracks the
+  /// file size rather than the buffer size.
+  ///
+  /// Returns `false` if `closeReadStream` released the loop before JS answered. `Promise.await()`
+  /// is built on a non-cancellable continuation, so a consumer that never settles would
+  /// otherwise park the loop on an open descriptor for the life of the process.
+  private func deliver(
+    _ event: ReadStreamDataEvent,
+    to listener: (ReadStreamDataEvent) -> Promise<Promise<Bool>>,
+    state: ReadStreamState
+  ) async throws -> Bool {
+    let (acks, ackContinuation) = AsyncStream<Error?>.makeStream()
+    state.ackContinuation = ackContinuation
+    // `closeReadStream` may have run between the loop's `while` check and this assignment, in
+    // which case it finished the previous continuation and nothing will ever finish this one.
+    guard state.isActive else {
+      state.ackContinuation = nil
+      return false
+    }
+
+    let settle: (Error?) -> Void = { error in
+      ackContinuation.yield(error)
+      ackContinuation.finish()
+    }
+
+    listener(event)
+      .then({ inner in
+        inner
+          .then({ _ in settle(nil) })
+          .catch({ error in settle(error) })
+      })
+      .catch({ error in settle(error) })
+
+    var iterator = acks.makeAsyncIterator()
+    let outcome = await iterator.next()
+    state.ackContinuation = nil
+
+    guard let outcome = outcome else { return false }
+    if let error = outcome { throw error }
+    return true
   }
 
   // MARK: - Read Stream Methods
@@ -231,8 +346,18 @@ class Fs2Stream: HybridFs2StreamSpec {
         try? fileHandle.truncate(atOffset: 0)
       }
 
+      let requestedCapacity = options?.bufferSize ?? Double(Self.defaultBufferSize)
+      guard requestedCapacity.isFinite,
+            requestedCapacity >= 1,
+            requestedCapacity <= Double(Self.maxBufferSize),
+            let capacity = Int(exactly: requestedCapacity.rounded(.down)) else {
+        try? fileHandle.close()
+        throw StreamError.invalidArgument(
+          message: "bufferSize must be between 1 and \(Self.maxBufferSize), got \(requestedCapacity)")
+      }
+
       let streamId = UUID().uuidString
-      let state = WriteStreamState(fileHandle: fileHandle, options: options)
+      let state = WriteStreamState(fileHandle: fileHandle, options: options, capacity: capacity)
       state.isActive = true
 
       // Setup AsyncStream for write buffer
@@ -251,6 +376,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
         do {
           for await (data, _) in stream {
+            defer { state.release(data.count) }
             try state.fileHandle.write(contentsOf: data)
 
             state.position += Int64(data.count)
@@ -276,6 +402,10 @@ class Fs2Stream: HybridFs2StreamSpec {
           state.isActive = false
           state.writeBufferContinuation?.finish() // nothing will drain the queue now
         }
+
+        // Nothing will drain the queue from here on, so anyone still waiting for room has to
+        // be let go - they fail on the finished continuation rather than hanging.
+        state.closeBudget()
 
         // Cleanup: remove from map, sync and close file, emit finish event, cleanup listeners
         self.withRegistry { _ = self.writeStreams.removeValue(forKey: streamId) }
@@ -305,7 +435,7 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
 
       // Before any conversion: `Int(_: Double)` traps, and `UInt64(start)` traps on negatives.
-      let requestedBufferSize = state.options?.bufferSize ?? Double(BufferPool.defaultBufferSize)
+      let requestedBufferSize = state.options?.bufferSize ?? Double(Self.defaultBufferSize)
       guard requestedBufferSize.isFinite,
             requestedBufferSize >= 1,
             requestedBufferSize <= Double(Self.maxBufferSize),
@@ -348,6 +478,10 @@ class Fs2Stream: HybridFs2StreamSpec {
       state.task = Task(priority: .background) { [weak self] in
         guard let self = self else { return }
         var bytesReadTotal: Int64 = 0
+        // One buffer for the whole stream, sized exactly. The pool this replaced bucketed at
+        // 8 KB, so every default-configured stream missed it on `acquire` and was rejected on
+        // `release`, and each "recycle" allocated and zeroed a fresh buffer anyway.
+        var buffer = Data(count: bufferSize)
         do {
           while state.isActive {
             if state.isPaused, let pauseStream = state.pauseStream {
@@ -367,10 +501,6 @@ class Fs2Stream: HybridFs2StreamSpec {
               bytesToRead = bufferSize
             }
 
-            // Use buffer pool - read directly into buffer
-            var buffer = self.bufferPool.acquire(requestedSize: bytesToRead)
-            defer { self.bufferPool.release(buffer) }
-
             let bytesRead = try buffer.withUnsafeMutableBytes { bufferPtr -> Int in
               guard let baseAddress = bufferPtr.baseAddress else { return 0 }
               let fd = fileHandle.fileDescriptor
@@ -389,12 +519,17 @@ class Fs2Stream: HybridFs2StreamSpec {
             let data = buffer.prefix(bytesRead)
             let arrayBuffer = try ArrayBuffer.copy(data: data)
 
-            self.withRegistry { self.readStreamDataListeners[streamId] }?(ReadStreamDataEvent(
-              streamId: streamId,
-              data: arrayBuffer,
-              chunk: chunk,
-              position: position
-            ))
+            if let listener = self.withRegistry({ self.readStreamDataListeners[streamId] }) {
+              let event = ReadStreamDataEvent(
+                streamId: streamId,
+                data: arrayBuffer,
+                chunk: chunk,
+                position: position
+              )
+              guard try await self.deliver(event, to: listener, state: state) else {
+                break
+              }
+            }
 
             position += Int64(bytesRead)
             state.position = position
@@ -493,6 +628,8 @@ class Fs2Stream: HybridFs2StreamSpec {
       // usually end the `for await`, but finishing the stream makes it deterministic.
       state.isPaused = false
       state.pauseStreamContinuation?.finish()
+      // Releases a loop waiting on the JS consumer - see `deliver(_:to:state:)`.
+      state.ackContinuation?.finish()
       state.task?.cancel()
       if let task = state.task {
         _ = await task.result
@@ -537,7 +674,17 @@ class Fs2Stream: HybridFs2StreamSpec {
       }
 
       let data = copiedBuffer.toData(copyIfNeeded: true)
-      state.writeBufferContinuation?.yield((data, false))
+
+      // Suspends while the queue is full: this promise resolving is the caller's signal that
+      // there is room, which is what `bufferSize` now bounds.
+      await state.reserve(data.count)
+
+      guard state.isActive,
+            let yielded = state.writeBufferContinuation?.yield((data, false)),
+            case .enqueued = yielded else {
+        state.release(data.count)
+        throw RuntimeError.error(withMessage: "EPIPE: Write stream is not active: \(streamId)")
+      }
     }
   }
 
@@ -615,7 +762,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - Event Listener Registration
 
-  func listenToReadStreamData(streamId: String, onData: @escaping (ReadStreamDataEvent) -> Void) throws -> () -> Void {
+  func listenToReadStreamData(streamId: String, onData: @escaping (ReadStreamDataEvent) -> Promise<Promise<Bool>>) throws -> () -> Void {
     withRegistry { self.readStreamDataListeners[streamId] = onData }
     return { [weak self] in self?.withRegistry { _ = self?.readStreamDataListeners.removeValue(forKey: streamId) } }
   }
