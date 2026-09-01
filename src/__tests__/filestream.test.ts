@@ -37,8 +37,9 @@ type WriteFinishEvent = {
 /**
  * A stand-in for the native stream layer.
  *
- * It reproduces the one property that drives B7 and B8: `startReadStream` emits every chunk
- * synchronously without awaiting the JS data callback, exactly as the native read loops do.
+ * `startReadStream` deliberately emits every chunk without awaiting the data callback, which
+ * the real read loops no longer do. That keeps this fake useful for everything that is not
+ * about back-pressure; the tests that need a consumer-aware reader install their own.
  */
 function installFakeNative(content: Buffer) {
   const state = {

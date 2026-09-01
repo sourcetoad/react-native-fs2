@@ -911,8 +911,8 @@ export async function runVerification(): Promise<Report> {
     }
   }
 
-  // A1: the read loop awaits what the data callback returns. Nothing else in this file
-  // exercises that - `pause()` above tests the older, separate mechanism.
+  // The read loop awaits whatever the data callback returns, which is the read path's
+  // back-pressure. Nothing else here exercises it - `pause()` above is a separate mechanism.
   {
     const name = 'an async data listener holds the read loop';
     const guards = 'streaming-backpressure';
@@ -1011,9 +1011,9 @@ export async function runVerification(): Promise<Report> {
     }
   );
 
-  // A2/A3: `bufferSize` bounds the write queue, and `write()` resolves when there is room.
-  // The assertion is causal rather than timed: the second write cannot resolve until the
-  // first has actually been written, which is what the progress event reports.
+  // `bufferSize` bounds the write queue, and `write()` resolves once there is room for the
+  // chunk. The assertion is causal rather than timed: the second write cannot resolve until
+  // the first has actually been written, which is what the progress event reports.
   await check(
     'write() waits for room in the bufferSize budget',
     'streaming-backpressure',
@@ -1046,8 +1046,8 @@ export async function runVerification(): Promise<Report> {
     }
   );
 
-  // The hang-shaped path A1 introduced: close() has to release a read loop that is parked on
-  // the JS consumer. `Promise.await()` is non-cancellable on both platforms, so if the
+  // The failure mode back-pressure introduces: close() has to release a read loop parked on
+  // its JS consumer. `Promise.await()` is non-cancellable on both platforms, so if the
   // interrupt is wrong this does not fail - it never returns.
   await check(
     'close() releases a read loop parked on its consumer',
