@@ -44,7 +44,8 @@
     "lint:fix": "eslint \"**/*.{js,ts,tsx}\" --fix",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
-    "nitrogen": "nitrogen"
+    "nitrogen": "nitrogen",
+    "verify:device": "node scripts/verify-device.mjs"
   },
   "repository": {
     "type": "git",
@@ -61,7 +62,7 @@
   ],
   "contributors": [
     "Johannes Lumpe <johannes@lum.pe> (https://github.com/johanneslumpe)",
-    "Hagen Hübel <hhuebel@itinance.com> (https://github.com/itinance)",
+    "Hagen H\u00fcbel <hhuebel@itinance.com> (https://github.com/itinance)",
     "Connor Tumbleson <connor@sourcetoad.com> (https://github.com/iBotPeaches)"
   ],
   "license": "MIT",

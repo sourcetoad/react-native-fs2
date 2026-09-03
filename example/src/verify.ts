@@ -1822,5 +1822,20 @@ export async function runVerification(): Promise<Report> {
   );
 
   console.log(`RNFS2_VERIFY_BEGIN${JSON.stringify(report)}RNFS2_VERIFY_END`);
+
+  const failedNames = checks
+    .filter((c) => c.status === 'fail')
+    .map((c) => c.name)
+    .slice(0, 8);
+  console.log(
+    `RNFS2_VERIFY_SUMMARY_BEGIN${JSON.stringify({
+      platform: report.platform,
+      osVersion: report.osVersion,
+      passed,
+      failed,
+      skipped,
+      failedNames,
+    })}RNFS2_VERIFY_SUMMARY_END`
+  );
   return report;
 }
