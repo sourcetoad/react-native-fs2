@@ -168,11 +168,31 @@ class RNFSManager(private val context: ReactApplicationContext) {
     fun read(filepath: String, length: Int, position: Int): ByteArray {
         getInputStream(filepath).use { inputStream ->
             val buffer = ByteArray(length)
-            inputStream.skip(position.toLong())
-            val bytesRead = inputStream.read(buffer, 0, length)
 
-            // If we read fewer bytes than requested, return a truncated array
-            return if (bytesRead < length) buffer.copyOf(bytesRead) else buffer
+            // `skip` is free to advance less than asked, especially on a `content://` source,
+            // so it has to be driven to the requested offset rather than called once. Landing
+            // short silently read the wrong region of the file.
+            var skipped = 0L
+            while (skipped < position) {
+                val n = inputStream.skip(position - skipped)
+                if (n <= 0L) break // nothing left to skip: the offset is at or past EOF
+                skipped += n
+            }
+            if (skipped < position) return ByteArray(0)
+
+            // One `read` can also return short without being at EOF, so fill the buffer until
+            // it is full or the stream really ends. At EOF `read` returns -1, which the old
+            // `buffer.copyOf(bytesRead)` turned into a NegativeArraySizeException surfaced to
+            // JS as "EUNSPECIFIED: -1" - a read past the end now yields an empty array, which
+            // is what iOS has always done.
+            var total = 0
+            while (total < length) {
+                val n = inputStream.read(buffer, total, length - total)
+                if (n <= 0) break
+                total += n
+            }
+
+            return if (total < length) buffer.copyOf(total) else buffer
         }
     }
 
@@ -228,12 +248,11 @@ class RNFSManager(private val context: ReactApplicationContext) {
         val outFile =
             File(getOriginalFilepath(destPath, false)) // Use original path for file operations
 
-        if (outFile.exists()) { // Added check to prevent overwriting an existing file by renameTo
-            if (!outFile.delete()) {
-                throw IOException("Failed to delete existing destination file: $destPath")
-            }
-        }
-
+        // The destination is never removed up front. Deleting it before the rename destroyed a
+        // pre-existing file whenever the move then failed - `moveFile(missing, important)`
+        // rejected with ENOENT and took `important` with it. `renameTo` already replaces the
+        // destination within a volume, and the copy fallback below opens the source first, so
+        // a missing source throws before the destination is touched.
         if (!inFile.renameTo(outFile)) {
             copyFile(filepath, destPath) // Original paths from parameters
             if (!inFile.delete()) {

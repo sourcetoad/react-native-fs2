@@ -374,6 +374,16 @@ class Fs2() : HybridFs2Spec() {
                     this.dest = File(options.toFile)
                     this.headers = convertHeadersToReadableMap(headers)
 
+                    // These four were declared on the options struct and defaulted by the JS
+                    // wrapper (src/index.ts) but never copied across, so they stayed at
+                    // DownloadParams' zeros. HttpURLConnection reads a 0 timeout as infinite,
+                    // which hung the promise forever against a server that stops responding,
+                    // and a 0 divider emitted a progress callback for every 8 KB chunk.
+                    options.connectionTimeout?.let { this.connectionTimeout = it.toInt() }
+                    options.readTimeout?.let { this.readTimeout = it.toInt() }
+                    options.progressInterval?.let { this.progressInterval = it.toInt() }
+                    options.progressDivider?.let { this.progressDivider = it.toFloat() }
+
                     // Assign callbacks directly from parameters
                     this.onDownloadBegin = { event ->
                         listeners.beginListeners[event.jobId]?.invoke(event)

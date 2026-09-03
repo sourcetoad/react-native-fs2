@@ -233,7 +233,7 @@ Creates a write stream for writing a large file in chunks.
 interface WriteStreamOptions {
   append?: boolean;            // Append to an existing file (default: false)
   bufferSize?: number;         // Bytes allowed to queue at once (default: 65536)
-  createDirectories?: boolean; // Create missing parent directories (default: true)
+  createDirectories?: boolean; // Create missing parent directories (default: false)
 }
 ```
 

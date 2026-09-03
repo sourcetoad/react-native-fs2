@@ -742,11 +742,11 @@ class Fs2: HybridFs2Spec {
       let intJobId = Int(jobId)
       self.downloaderQueue.sync {
         if let downloader = self.downloaders[intJobId] {
+          // `task.cancel(byProducingResumeData:)` hands back its data asynchronously, so
+          // asking `isResumable()` here always said false and discarded a downloader that was
+          // about to become resumable. `downloadCleanup` makes that call instead, once the
+          // completion handler has actually run.
           downloader.stopDownload()
-          // Only cleanup if not resumable
-          if !downloader.isResumable() {
-            self.downloaders.removeValue(forKey: intJobId)
-          }
         }
       }
     }
@@ -928,7 +928,11 @@ extension Fs2: DownloaderDelegate {
   // Always called in a defer/finally block from Downloader
   func downloadCleanup(jobId: Int) {
     self.downloaderQueue.sync {
-      self.downloaders.removeValue(forKey: jobId)
+      // A downloader still holding resume data has to stay reachable, or `isResumable()` and
+      // `resumeDownload()` have nothing to act on. Its continuation is settled either way.
+      if self.downloaders[jobId]?.isResumable() != true {
+        self.downloaders.removeValue(forKey: jobId)
+      }
       // Remove and resolve/reject continuation if still present (should be nil if already handled)
       if let continuation = self.downloadContinuations.removeValue(forKey: jobId) {
         // Defensive: always resolve if not already
