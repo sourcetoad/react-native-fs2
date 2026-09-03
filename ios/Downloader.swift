@@ -31,9 +31,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
   // MARK: - Public API
 
   func startDownload(from url: URL, to destination: String, headers: [String: String]?, options: DownloadFileOptions?) {
-    // Adopt the caller's jobId before anything can fail. The unwritable-destination path below
-    // reports an error, and reporting it against the default 1 rejected the wrong job and left
-    // the real one's continuation unresumed forever.
     if let options = options {
       jobId = Int(options.jobId)
     }
@@ -150,10 +147,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
   // MARK: - URLSessionDownloadDelegate
 
   func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-    // Capture the status as soon as a response exists, regardless of whether a length was
-    // declared. Doing this only inside the `totalBytesExpectedToWrite > 0` branch left
-    // `statusCode` nil for every chunked response, so a chunked 404 suppressed `begin` and
-    // every progress event and was later reported to JS as 200.
     if statusCode == nil, let httpResponse = downloadTask.response as? HTTPURLResponse {
       statusCode = httpResponse.statusCode
     }
@@ -212,7 +205,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
       delegate?.downloadCleanup(jobId: jobId)
     }
 
-    // The response is authoritative here; `didWriteData` never runs for an empty body.
     if statusCode == nil, let httpResponse = downloadTask.response as? HTTPURLResponse {
       statusCode = httpResponse.statusCode
     }
@@ -222,8 +214,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
     let fileManager = FileManager.default
     let destURL = URL(fileURLWithPath: destination)
 
-    // Only a 2xx body is the file the caller asked for. Moving unconditionally meant a 404
-    // error page deleted and replaced an existing local file.
     guard (200...299).contains(code) else {
       delegate?.downloadDidComplete(jobId: jobId, statusCode: code, bytesWritten: 0)
       return
@@ -245,8 +235,6 @@ class Downloader: NSObject, URLSessionDownloadDelegate {
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-    // `clearState()` nils `resumeData`, so running it unconditionally wiped the resume payload
-    // the moment it was captured and left `isResumable()`/`resumeDownload()` permanently dead.
     var keepResumeState = false
     defer {
       self.session?.finishTasksAndInvalidate()
