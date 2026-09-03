@@ -1590,6 +1590,215 @@ export async function runVerification(): Promise<Report> {
     }
   );
 
+  await check(
+    'write() round-trips through read()',
+    'buffer-marshalling',
+    async () => {
+      const file = `${root}/write-roundtrip.bin`;
+      const body = 'A'.repeat(64 * 1024);
+      await RNFS.writeFile(file, '', 'utf8');
+      await withTimeout(RNFS.write(file, body, 0), 15000, 'write()');
+
+      const got = (await RNFS.readFile(file, 'utf8')) as string;
+      assert(
+        got === body,
+        `read back ${got.length} bytes, expected ${body.length}` +
+          (got.length ? ` (starts ${JSON.stringify(got.slice(0, 8))})` : '')
+      );
+      return `${body.length} bytes byte-exact`;
+    }
+  );
+
+  await check(
+    'appendFile() round-trips through readFile()',
+    'buffer-marshalling',
+    async () => {
+      const file = `${root}/append-roundtrip.txt`;
+      await RNFS.writeFile(file, 'head-', 'utf8');
+      await withTimeout(RNFS.appendFile(file, 'tail'), 15000, 'appendFile()');
+
+      const got = (await RNFS.readFile(file, 'utf8')) as string;
+      assert(got === 'head-tail', `got ${JSON.stringify(got)}`);
+      return `appended to ${JSON.stringify(got)}`;
+    }
+  );
+
+  await check('read() past EOF resolves empty', 'read-eof', async () => {
+    const file = `${root}/read-eof.txt`;
+    const body = 'hello world';
+    await RNFS.writeFile(file, body, 'utf8');
+
+    const got = await withTimeout(
+      RNFS.read(file, 100, body.length, 'utf8'),
+      10000,
+      'read() at EOF'
+    );
+    assert(got === '', `expected empty string, got ${JSON.stringify(got)}`);
+    return 'resolved with an empty string';
+  });
+
+  await check(
+    'read() rejects a negative position',
+    'read-validation',
+    async () => {
+      const file = `${root}/read-negative.txt`;
+      await RNFS.writeFile(file, 'hello world', 'utf8');
+
+      let rejected = false;
+      let message = '';
+      try {
+        await withTimeout(RNFS.read(file, 5, -1, 'utf8'), 10000, 'read(-1)');
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(rejected, 'accepted position: -1');
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  await check(
+    'moveFile() failure leaves the destination intact',
+    'move-no-data-loss',
+    async () => {
+      const dest = `${root}/move-target.txt`;
+      const kept = 'PRECIOUS-MOVE-TARGET';
+      await RNFS.writeFile(dest, kept, 'utf8');
+      assert(await RNFS.exists(dest), 'destination missing before the move');
+
+      const missing = `${root}/no-such-source-${Date.now()}.txt`;
+      let rejected = false;
+      try {
+        await withTimeout(RNFS.moveFile(missing, dest), 15000, 'moveFile()');
+      } catch {
+        rejected = true;
+      }
+      assert(rejected, 'moveFile() from a missing source resolved');
+
+      const after = (await RNFS.exists(dest))
+        ? await RNFS.readFile(dest, 'utf8')
+        : '<DELETED>';
+      assert(after === kept, `destination is now ${JSON.stringify(after)}`);
+      return 'destination survived a rejected move';
+    }
+  );
+
+  await check(
+    'createWriteStream() does not create directories by default',
+    'stream-createdirectories-default',
+    async () => {
+      const target = `${root}/absent-dir-${Date.now()}/out.bin`;
+      let rejected = false;
+      let message = '';
+      try {
+        const stream = await withTimeout(
+          createWriteStream(target),
+          10000,
+          'createWriteStream()'
+        );
+        await stream.close();
+      } catch (e: any) {
+        rejected = true;
+        message = e?.message ?? String(e);
+      }
+      assert(
+        rejected,
+        'opened into a missing directory, so the documented default of false is wrong'
+      );
+      return `rejected: ${message.slice(0, 90)}`;
+    }
+  );
+
+  await check(
+    'downloadFile() leaves an existing file intact on a 404',
+    'download-404-no-clobber',
+    async () => {
+      const dest = `${root}/download-target.txt`;
+      const kept = 'PRECIOUS-DOWNLOAD-TARGET';
+      await RNFS.writeFile(dest, kept, 'utf8');
+
+      const notFound = `http://localhost:8081/rnfs2-verify-no-such-route`;
+      try {
+        await withTimeout(
+          RNFS.downloadFile({ fromUrl: notFound, toFile: dest }).promise,
+          30000,
+          'downloadFile() 404'
+        );
+      } catch {
+        // A rejection is acceptable; the destination is what is under test.
+      }
+
+      const after = (await RNFS.exists(dest))
+        ? await RNFS.readFile(dest, 'utf8')
+        : '<DELETED>';
+      assert(after === kept, `destination is now ${JSON.stringify(after)}`);
+      return 'destination survived a 404';
+    }
+  );
+
+  await check(
+    'downloadFile() reports a 404 status',
+    'download-status-code',
+    async () => {
+      const dest = `${root}/download-status.txt`;
+      await RNFS.unlink(dest).catch(() => {});
+
+      const notFound = `http://localhost:8081/rnfs2-verify-no-such-route`;
+      const res = await withTimeout(
+        RNFS.downloadFile({ fromUrl: notFound, toFile: dest }).promise,
+        30000,
+        'downloadFile() status'
+      );
+      assert(
+        res.statusCode === 404,
+        `reported statusCode=${res.statusCode}, expected 404`
+      );
+      return `statusCode=${res.statusCode}`;
+    }
+  );
+
+  await check(
+    'downloadFile() settles on an unwritable destination',
+    'download-settles',
+    async () => {
+      const dir = `${root}/download-into-a-directory`;
+      await RNFS.mkdir(dir);
+
+      const started = Date.now();
+      let outcome: string;
+      try {
+        const res = await withTimeout(
+          RNFS.downloadFile({ fromUrl: DOWNLOAD_URL, toFile: dir }).promise,
+          15000,
+          'downloadFile() unwritable'
+        );
+        outcome = `resolved ${JSON.stringify(res)}`;
+      } catch (e: any) {
+        const message = e?.message ?? String(e);
+        assert(
+          !message.includes('timed out'),
+          `promise never settled (${Date.now() - started}ms)`
+        );
+        outcome = `rejected: ${message.slice(0, 70)}`;
+      }
+      return `settled in ${Date.now() - started}ms: ${outcome}`;
+    }
+  );
+
+  await skip(
+    'downloadFile() resumes an interrupted download',
+    'download-resume',
+    'needs a byte-range capable server (Accept-Ranges + a validator); Metro serves neither, ' +
+      'so URLSession never produces resume data. Covered manually against a range-capable fixture.'
+  );
+
+  await skip(
+    'downloadFile() honours readTimeout',
+    'download-read-timeout',
+    'needs a server that accepts the socket and never responds; Metro always answers. ' +
+      'Covered manually against a stalling fixture.'
+  );
+
   const passed = checks.filter((c) => c.status === 'pass').length;
   const failed = checks.filter((c) => c.status === 'fail').length;
   const skipped = checks.filter((c) => c.status === 'skip').length;

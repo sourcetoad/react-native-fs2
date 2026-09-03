@@ -166,6 +166,17 @@ class Fs2() : HybridFs2Spec() {
     override fun read(filepath: String, length: Double, position: Double): Promise<ArrayBuffer> {
         return Promise.async {
             try {
+                if (!position.isFinite() || position < 0) {
+                    throw FsError(
+                        "EINVAL: position must be a non-negative finite number, got $position"
+                    )
+                }
+                if (!length.isFinite() || length < 0) {
+                    throw FsError(
+                        "EINVAL: length must be a non-negative finite number, got $length"
+                    )
+                }
+
                 val lengthInt = length.toInt()
                 val positionInt = position.toInt()
 
