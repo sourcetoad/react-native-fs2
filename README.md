@@ -659,7 +659,7 @@ object reaches the call as a separately-typed variable, so check those by hand.
 #### `moveFile` and `copyFile` overwrite an existing destination on iOS
 
 In 3.x these failed on iOS if something already existed at `destPath`, while Android
-overwrote it. Both platforms now overwrite: the destination is removed first.
+overwrote it. Both platforms now overwrite.
 
 ```typescript
 // v3.x on iOS: rejects if dest exists. On Android: overwrites.
@@ -673,6 +673,15 @@ iOS rejection to avoid clobbering a file, check with `exists()` first:
 ```typescript
 if (await RNFS.exists(dest)) throw new Error('refusing to overwrite');
 await RNFS.copyFile(src, dest);
+```
+
+Only a *successful* call overwrites. If the source does not exist the call rejects and the
+destination is left exactly as it was:
+
+```typescript
+await RNFS.writeFile(dest, 'important', 'utf8');
+await RNFS.moveFile('/does/not/exist', dest); // rejects with ENOENT
+await RNFS.readFile(dest, 'utf8'); // still 'important'
 ```
 
 A directory destination is also handled now: passing one appends the source filename rather
@@ -689,6 +698,23 @@ RNFS.downloadFile({ fromUrl, toFile, canBeResumed: (event) => {} });
 ```
 
 An unmigrated `resumable: () => {}` is ignored — it never fires.
+
+#### `downloadFile` only writes `toFile` on a 2xx response
+
+A non-2xx response leaves `toFile` untouched — an existing file there is not replaced by the
+error body — and the promise resolves with the real status code and `bytesWritten: 0`. Check
+`statusCode` before treating the download as successful:
+
+```typescript
+const { promise } = RNFS.downloadFile({ fromUrl, toFile });
+const { statusCode, bytesWritten } = await promise;
+
+if (statusCode !== 200) {
+  // toFile was not written; whatever was there before is intact.
+}
+```
+
+This holds whether or not the server declares a `Content-Length`.
 
 #### `completeHandlerIOS` was removed
 

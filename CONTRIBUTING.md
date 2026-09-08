@@ -89,6 +89,29 @@ Remember to add tests for your change if possible. Run the unit tests by:
 yarn test
 ```
 
+#### On-device verification
+
+The unit suite mocks the native layer, so it cannot catch anything that lives in Swift or
+Kotlin — a wrong timestamp unit, a missing enum case, a buffer read after the call returned.
+`example/src/verify.ts` exercises the real native layer on a real device and is the only thing
+that covers that ground. It runs automatically when the example app launches, and the result
+is also shown under **Run Test** in the app.
+
+To run it from the command line against every booted simulator and emulator:
+
+```sh
+npm run verify:device          # all booted mobile devices
+npm run verify:device ios      # one platform
+```
+
+It exits non-zero if any check fails, and prints the names of the failing checks. It needs
+Metro running (`yarn example start`) and the example app already installed on the target.
+Device discovery and app launch go through
+[`agent-device`](https://github.com/callstack/agent-device), fetched on demand via `npx`.
+
+If you change native code, add a check to `verify.ts` guarding the behaviour. Each check names
+the fix it guards in its `guards` argument, so a failure points straight at what regressed.
+
 ### Commit message convention
 
 We follow the [conventional commits specification](https://www.conventionalcommits.org/en) for our commit messages:
@@ -128,6 +151,7 @@ The `package.json` file contains various scripts for common tasks:
 - `yarn typecheck`: type-check files with TypeScript.
 - `yarn lint`: lint files with ESLint.
 - `yarn test`: run unit tests with Jest.
+- `npm run verify:device`: run the on-device suite against booted simulators/emulators.
 - `yarn example start`: start the Metro server for the example app.
 - `yarn example android`: run the example app on Android.
 - `yarn example ios`: run the example app on iOS.
