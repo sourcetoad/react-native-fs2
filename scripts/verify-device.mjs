@@ -95,7 +95,9 @@ async function verifyDevice(device) {
 
   await agentDevice(['logs', 'stop'], { allowFailure: true });
   const logs =
-    (await agentDevice(['logs', 'clear', '--restart'], { allowFailure: true })) ??
+    (await agentDevice(['logs', 'clear', '--restart'], {
+      allowFailure: true,
+    })) ??
     (await agentDevice(['logs', 'start'], { allowFailure: true })) ??
     (await agentDevice(['logs', 'path'], { allowFailure: true }));
   const logPath = logs?.data?.path ?? null;

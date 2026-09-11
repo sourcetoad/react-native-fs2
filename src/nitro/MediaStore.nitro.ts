@@ -25,8 +25,10 @@ export interface MediaStoreSearchOptions {
   mediaType: MediaCollectionType; // Which collection to query
 }
 
-export interface MediaStore
-  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+export interface MediaStore extends HybridObject<{
+  ios: 'swift';
+  android: 'kotlin';
+}> {
   mediaStoreCreateFile(
     fileDescription: FileDescription,
     mediaCollection: MediaCollectionType
@@ -43,7 +45,8 @@ export interface MediaStore
     sourceFilePath: string // Path of the local file to write from
   ): Promise<void>; // (Android only)
 
-  mediaStoreCopyFromFile( // Copies a local file into the MediaStore
+  mediaStoreCopyFromFile(
+    // Copies a local file into the MediaStore
     sourceFilePath: string,
     fileDescription: FileDescription, // Describes the new media file to be created
     mediaCollection: MediaCollectionType

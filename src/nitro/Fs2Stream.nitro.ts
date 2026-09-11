@@ -65,8 +65,10 @@ export interface WriteStreamErrorEvent {
   code?: string;
 }
 
-export interface Fs2Stream
-  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+export interface Fs2Stream extends HybridObject<{
+  ios: 'swift';
+  android: 'kotlin';
+}> {
   // File Stream APIs
   createReadStream(
     path: string,
