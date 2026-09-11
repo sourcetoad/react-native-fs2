@@ -1450,6 +1450,95 @@ export async function runVerification(): Promise<Report> {
         return 'resolved false rather than rejecting';
       }
     );
+
+    // hash() resolves a content:// URI through the deprecated "_data" column, which is not
+    // guaranteed to be populated under scoped storage on API 29+. Whether it is populated for
+    // an entry the app inserted itself is empirical, so ask the device.
+    await check('hash() digests a content:// URI', 'content-uri', async () => {
+      const source = `${root}/content-uri-hash.png`;
+      const PNG_1PX_BASE64 =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      await RNFS.writeFile(source, PNG_1PX_BASE64, 'base64');
+      const expected = await RNFS.hash(source, 'md5');
+
+      const uri = await MediaStore.copyToMediaStore(
+        {
+          name: `rnfs2-hash-${Date.now()}.png`,
+          parentFolder: 'RNFS2Verify',
+          mimeType: 'image/png',
+        },
+        MediaStore.MEDIA_IMAGE,
+        source
+      );
+
+      try {
+        // The control: stat() reads through the ContentResolver, so a failure here means the
+        // URI is bad and says nothing about hash().
+        const stat = await RNFS.stat(uri);
+        assert(stat.size > 0, `stat reported size ${stat.size} for ${uri}`);
+
+        const actual = await RNFS.hash(uri, 'md5');
+        assert(
+          actual === expected,
+          `hash() returned ${actual} for the content:// URI, but the same bytes on disk ` +
+            `hash to ${expected}`
+        );
+        return `stat and hash both resolved it; md5=${actual}, so "_data" is populated here`;
+      } finally {
+        await RNFS.unlink(uri).catch(() => {});
+      }
+    });
+
+    // The same call against a provider with no "_data" column at all, which MediaStore's
+    // populated one masks: a FileProvider cursor exposes only DISPLAY_NAME and SIZE. Its URI is
+    // a plain string, so this needs no picker and no native helper.
+    await check(
+      'hash() digests a content:// URI with no "_data" column',
+      'content-uri',
+      async () => {
+        const name = `fileprovider-${Date.now()}.txt`;
+        const file = `${root}/${name}`;
+        await RNFS.writeFile(file, 'the bytes under test', 'utf8');
+        const expected = await RNFS.hash(file, 'md5');
+
+        const uri = `content://fs2.example.fileprovider/files/${root.split('/').pop()}/${name}`;
+
+        // The control again: if readFile() can read it, anything hash() does differently is ours.
+        let readBack: string | ArrayBuffer;
+        try {
+          readBack = await RNFS.readFile(uri, 'utf8');
+        } catch (e: any) {
+          throw new Error(
+            `the control failed, so this says nothing about hash(): readFile(${uri}) ` +
+              `threw ${e?.message ?? e}`
+          );
+        }
+        assert(
+          readBack === 'the bytes under test',
+          `readFile() returned ${JSON.stringify(readBack)} for ${uri}`
+        );
+
+        const actual = await RNFS.hash(uri, 'md5');
+        assert(
+          actual === expected,
+          `hash() returned ${actual}, expected ${expected}`
+        );
+        return `readFile and hash agree on a _data-less provider; md5=${actual}`;
+      }
+    );
+
+    // hash() raises both codes on the way in rather than from an explicit guard: EISDIR from
+    // getFileUri, ENOENT from getInputStream. Android-only because only the Kotlin path changed.
+    await check('hash() rejects ENOENT for a missing file', 'content-uri', () =>
+      expectRejection(
+        () => RNFS.hash(`${root}/definitely-not-here.txt`, 'md5'),
+        'ENOENT'
+      )
+    );
+
+    await check('hash() rejects EISDIR for a directory', 'content-uri', () =>
+      expectRejection(() => RNFS.hash(root, 'md5'), 'EISDIR')
+    );
   } else {
     await skip(
       'exists() and unlink() resolve a content:// URI',

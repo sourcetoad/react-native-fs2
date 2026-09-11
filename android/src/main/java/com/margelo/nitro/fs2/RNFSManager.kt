@@ -10,7 +10,6 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
@@ -203,23 +202,8 @@ class RNFSManager(private val context: ReactApplicationContext) {
             throw IllegalArgumentException("Invalid hash algorithm: $algorithm")
         }
 
-        val file = File(getOriginalFilepath(filepath, false))
-
-        if (file.isDirectory) {
-            throw IORejectionException(
-                "EISDIR",
-                "EISDIR: illegal operation on a directory, read '$filepath'"
-            )
-        }
-        if (!file.exists()) {
-            throw IORejectionException(
-                "ENOENT",
-                "ENOENT: no such file or directory, open '$filepath'"
-            )
-        }
-
         val md = MessageDigest.getInstance(algorithms[algorithm.lowercase()])
-        FileInputStream(file).use { inputStream -> // Use the file path directly for FileInputStream
+        getInputStream(filepath).use { inputStream ->
             val buffer = ByteArray(1024 * 10)
             var read: Int
             while (inputStream.read(buffer).also { read = it } != -1) {

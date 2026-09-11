@@ -26,5 +26,16 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+
+    <!-- A content:// source with no "_data" column, for example/src/verify.ts. -->
+    <provider
+      android:name="androidx.core.content.FileProvider"
+      android:authorities="fs2.example.fileprovider"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/provider_paths" />
+    </provider>
   </application>
 </manifest>
