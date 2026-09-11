@@ -1547,6 +1547,41 @@ export async function runVerification(): Promise<Report> {
     );
   }
 
+  for (const ch of ['#', '?']) {
+    await check(
+      `writeFile()/readFile() round-trip a name containing "${ch}"`,
+      'path-url-parsing',
+      async () => {
+        const file = `${root}/rt${ch}name.txt`;
+        const truncated = `${root}/rt`;
+        await RNFS.writeFile(file, 'abc', 'utf8');
+        assert(
+          !(await RNFS.exists(truncated)),
+          `writeFile created ${truncated} instead of ${file}`
+        );
+        const got = await RNFS.readFile(file, 'utf8');
+        assert(got === 'abc', `readFile returned "${got}"`);
+        return 'round-trip intact';
+      }
+    );
+
+    await check(
+      `hash() digests a file whose name contains "${ch}"`,
+      'path-url-parsing',
+      async () => {
+        const file = `${root}/hs${ch}name.txt`;
+        await RNFS.writeFile(file, 'abc', 'utf8');
+        await RNFS.writeFile(`${root}/hs`, 'decoy', 'utf8');
+        const got = await RNFS.hash(file, 'md5');
+        assert(
+          got === '900150983cd24fb0d6963f7d28e17f72',
+          `expected md5 of "abc", got ${got}`
+        );
+        return `md5=${got}`;
+      }
+    );
+  }
+
   // --- Write-side failure paths ---------------------------------------------------------------
   // Read-side errors were covered; write-side were not. These use a path whose parent is a
   // regular file, which is ENOTDIR on both platforms - deterministic, and it needs no special

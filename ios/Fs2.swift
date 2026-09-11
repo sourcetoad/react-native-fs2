@@ -334,9 +334,7 @@ class Fs2: HybridFs2Spec {
         throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot hash: \(normalizedFilepath)")
       }
       
-      guard let fileURL = URL(string: "file://\(normalizedFilepath)") else {
-        throw RuntimeError.error(withMessage: "EURL: Could not create URL for path: \(normalizedFilepath)")
-      }
+      let fileURL = URL(fileURLWithPath: normalizedFilepath)
       
       guard let fileData = try? Data(contentsOf: fileURL) else {
         throw RuntimeError.error(withMessage: "EREAD: Could not read file data from path: \(normalizedFilepath)")

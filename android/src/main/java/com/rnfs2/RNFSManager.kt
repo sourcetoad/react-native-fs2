@@ -54,7 +54,7 @@ class RNFSManager(private val context: ReactApplicationContext) {
                     "EISDIR: illegal operation on a directory, read '$filepath'"
                 )
             }
-            return "file://$filepath".toUri()
+            return Uri.fromFile(file)
         }
         return uri
     }
