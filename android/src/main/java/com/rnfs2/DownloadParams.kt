@@ -1,6 +1,7 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 import com.facebook.react.bridge.ReadableMap
+import com.margelo.nitro.fs2.*
 import java.io.File
 import java.net.URL
 

@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 object RNFSFileTransformer {
   interface FileTransformer {

@@ -1,11 +1,11 @@
-package com.margelo.nitro.fs2.utils
+package com.rnfs2.utils
 
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.core.net.toUri
 import java.io.File
-import com.margelo.nitro.fs2.IORejectionException
+import com.rnfs2.IORejectionException
 
 object Fs2Util {
     fun getFileUri(filepath: String, isDirectoryAllowed: Boolean = false): Uri {

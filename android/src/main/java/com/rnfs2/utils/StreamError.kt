@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2.utils
+package com.rnfs2.utils
 
 sealed class StreamError : JsVisibleError() {
     data class NotFound(val path: String) : StreamError() {

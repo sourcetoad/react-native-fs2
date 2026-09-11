@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2.utils
+package com.rnfs2.utils
 
 /**
  * Base class for every error this module deliberately surfaces to JavaScript.
@@ -19,7 +19,7 @@ package com.margelo.nitro.fs2.utils
  *
  * ```
  * java.lang.Error: ENOENT: no such file or directory, open '/x'
- * 	at com.margelo.nitro.fs2.Fs2...
+ * 	at com.rnfs2.Fs2Impl...
  * ```
  *
  * which breaks `err.message.startsWith('ENOENT')` — the documented contract of this

@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 import android.app.RecoverableSecurityException
 import android.content.ContentResolver
@@ -18,6 +18,7 @@ import java.io.InputStream
 import java.io.OutputStream
 
 import com.margelo.nitro.NitroModules
+import com.margelo.nitro.fs2.*
 
 class RNFSMediaStoreManager {
     private val context = NitroModules.applicationContext

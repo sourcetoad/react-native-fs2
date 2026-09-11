@@ -4,7 +4,7 @@ Every public export on both sides, compared. Built by reading `master:src/index.
 `master:src/types.ts`, `master:README.md`, `master:ios/RNFSManager.m`,
 `master:android/.../RNFSManager.java`, `master:android/.../RNFSMediaStoreManager.java`,
 `src/index.ts`, `src/types.ts`, `src/_mediastore.ts`, `src/_filestream.ts`, the three
-`.nitro.ts` specs, `ios/*.swift`, `android/.../com/margelo/nitro/fs2/**` and the regenerated
+`.nitro.ts` specs, `ios/*.swift`, `android/.../com/rnfs2/**` and the regenerated
 `nitrogen/generated/**`.
 
 **Every claim about native behaviour was checked against native code on both platforms and

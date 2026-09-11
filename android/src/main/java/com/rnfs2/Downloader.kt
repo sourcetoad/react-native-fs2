@@ -1,8 +1,9 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 import android.os.Build
 import android.util.Log
 import com.margelo.nitro.core.AnyMap
+import com.margelo.nitro.fs2.*
 import java.io.BufferedInputStream
 import java.io.FileOutputStream
 import java.io.InputStream

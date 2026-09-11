@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -18,7 +18,8 @@ import java.io.RandomAccessFile
 import java.security.MessageDigest
 import androidx.core.net.toUri
 import com.facebook.react.bridge.ReactApplicationContext
-import com.margelo.nitro.fs2.utils.Fs2Util
+import com.margelo.nitro.fs2.*
+import com.rnfs2.utils.Fs2Util
 
 class RNFSManager(private val context: ReactApplicationContext) {
     companion object {

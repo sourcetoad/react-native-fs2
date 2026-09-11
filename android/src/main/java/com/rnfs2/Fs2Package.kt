@@ -1,4 +1,4 @@
-package com.margelo.nitro.fs2
+package com.rnfs2
 
 import com.facebook.react.BaseReactPackage
 import com.facebook.react.bridge.NativeModule
