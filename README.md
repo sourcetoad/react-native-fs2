@@ -47,6 +47,9 @@ npm i --save react-native-nitro-modules
 ### Changelog
 Changes can be found in [CHANGELOG.md](CHANGELOG.md)
 
+### Upgrading
+Migrating from v3.x to v4.x? See [UPGRADE.md](UPGRADE.md).
+
 ### What's New in 4.x
 
 - **Nitro Modules Architecture**: Complete rewrite using Nitro Modules for superior performance
@@ -55,7 +58,7 @@ Changes can be found in [CHANGELOG.md](CHANGELOG.md)
 - **ArrayBuffer Built-in**: Native ArrayBuffer support without additional dependencies
 - **Backward Compatible API**: Most existing code works without changes!
 
-> **Note**: v4.x requires `react-native-nitro-modules` as a peer dependency. See migration notes below.
+> **Note**: v4.x requires `react-native-nitro-modules` as a peer dependency. Coming from 3.x? Read [UPGRADE.md](./UPGRADE.md).
 
 ## Usage
 ```ts
@@ -372,23 +375,15 @@ await stream.close();
 
 # MediaStore
 
-> **Breaking change in 4.x:** `MediaStore` is a named export now, not a property of the
-> default export. Reading it off the default export gives `undefined`, and calling a method
-> on it throws.
->
-> ```ts
-> // v3.x
-> import RNFS from 'react-native-fs2';
-> await RNFS.MediaStore.queryMediaStore({ ... });
->
-> // v4.x
-> import { MediaStore } from 'react-native-fs2';
-> await MediaStore.queryMediaStore({ ... });
-> ```
->
-> The examples below use `MediaStore` from the named import.
+`MediaStore` is a named export, not a property of the default export:
 
-### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore. 
+```ts
+import { MediaStore } from 'react-native-fs2';
+```
+
+> Upgrading from 3.x? `RNFS.MediaStore` is gone — see [UPGRADE.md](./UPGRADE.md).
+
+### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore.
 
 ### Inspiration for this feature came from [react-native-blob-util](https://github.com/RonRadtke/react-native-blob-util/wiki/MediaStore/)
 
@@ -552,221 +547,11 @@ type MediaStoreFile = {
  * `LibraryDirectoryPath` - Absolute path to [NSLibraryDirectory](https://developer.apple.com/documentation/foundation/nssearchpathdirectory/nslibrarydirectory)
  * `MainBundlePath` - Absolute path to main bundle directory.
 
-#### On the platform where a constant does not apply
+##### On the platform where a constant does not apply
 
-Every constant is a `string` and is `''` on the platform that does not provide it. In 3.x these
-were a mix of `null` (Android's external paths) and `undefined` (keys missing from the native
-map entirely), so a `=== null` or `=== undefined` check needs updating:
+Every constant is a `string` and is `''` on the platform that does not provide it, so a plain
+truthiness check works everywhere:
 
 ```typescript
-// v3.x
-if (RNFS.ExternalStorageDirectoryPath !== null) { }
-
-// v4.x — '' is falsy, so a plain truthiness check works on both
 if (RNFS.ExternalStorageDirectoryPath) { }
 ```
-
-## Migrating from v3.x to v4.x
-
-The v4.x release rewrites the native bridge on [Nitro Modules](https://github.com/mrousavy/nitro).
-Most call sites are unchanged, but there are real breaking changes — read this section before
-upgrading.
-
-### Installation
-
-1. **Install peer dependency:**
-```bash
-npm install react-native-nitro-modules
-# or
-yarn add react-native-nitro-modules
-```
-
-2. **Update react-native-fs2:**
-```bash
-npm install react-native-fs2@latest
-# or
-yarn add react-native-fs2@latest
-```
-
-Requires React Native `>=0.82.0` and `react-native-nitro-modules@^0.37.0`.
-
-### Breaking Changes
-
-#### Timestamps are numbers, not Dates
-
-```typescript
-// v3.x
-const items = await RNFS.readDir(path);
-const date = items[0].mtime; // Date object
-
-// v4.x
-const items = await RNFS.readDir(path);
-const timestamp = items[0].mtime; // number (ms since epoch)
-const date = new Date(items[0].mtime);
-```
-
-Affects `ctime` and `mtime` on both `readDir()` and `stat()`.
-
-#### `MediaStore` moved to a named export
-
-`RNFS.MediaStore` is gone. Import it directly — see the [MediaStore](#mediastore) section.
-
-```typescript
-// v3.x
-import RNFS from 'react-native-fs2';
-await RNFS.MediaStore.queryMediaStore({ ... });
-
-// v4.x
-import { MediaStore } from 'react-native-fs2';
-await MediaStore.queryMediaStore({ ... });
-```
-
-#### `queryMediaStore` result shape changed, and can be `undefined`
-
-- Type renamed `MediaStoreQueryResult` → `MediaStoreFile`, and `FileDescriptor` →
-  `FileDescription`.
-- Property renamed `contentUri` → `uri`. New fields: `name`, `mimeType`, `size`, `dateAdded`,
-  `dateModified`, `relativePath`.
-- The return type is now `Promise<MediaStoreFile | undefined>` — a query that matches nothing
-  resolves `undefined` instead of rejecting.
-
-#### `MkdirOptions` keys renamed
-
-`NSURLIsExcludedFromBackupKey` → `excludedFromBackup`, `NSFileProtectionKey` →
-`fileProtection`. Passed inline this is a compile error — TypeScript rejects the unknown key
-and suggests the new name. It only slips through silently if the options object reaches the
-call as a separately-typed variable, so check those by hand.
-
-#### `FileOptions.NSFileProtectionKey` renamed to `fileProtection`
-
-`writeFile`, `moveFile` and `copyFile` still accept iOS file protection, as they did in 3.x —
-`writeFile` through its encoding argument, `moveFile`/`copyFile` through a third parameter —
-but the key is renamed and its type narrowed from `string` to the `FileProtectionType` union.
-
-```typescript
-// v3.x
-await RNFS.writeFile(path, data, { encoding: 'utf8', NSFileProtectionKey: 'NSFileProtectionComplete' });
-await RNFS.moveFile(from, to, { NSFileProtectionKey: 'NSFileProtectionComplete' });
-
-// v4.x
-await RNFS.writeFile(path, data, { encoding: 'utf8', fileProtection: 'NSFileProtectionComplete' });
-await RNFS.moveFile(from, to, { fileProtection: 'NSFileProtectionComplete' });
-```
-
-Passed inline the old key is a compile error. It only slips through silently if the options
-object reaches the call as a separately-typed variable, so check those by hand.
-
-#### `moveFile` and `copyFile` overwrite an existing destination on iOS
-
-In 3.x these failed on iOS if something already existed at `destPath`, while Android
-overwrote it. Both platforms now overwrite.
-
-```typescript
-// v3.x on iOS: rejects if dest exists. On Android: overwrites.
-// v4.x on both: overwrites, destroying whatever was at dest.
-await RNFS.copyFile(src, dest);
-```
-
-This is silent — nothing warns you, and the previous contents are gone. If you relied on the
-iOS rejection to avoid clobbering a file, check with `exists()` first:
-
-```typescript
-if (await RNFS.exists(dest)) throw new Error('refusing to overwrite');
-await RNFS.copyFile(src, dest);
-```
-
-Only a *successful* call overwrites. If the source does not exist the call rejects and the
-destination is left exactly as it was:
-
-```typescript
-await RNFS.writeFile(dest, 'important', 'utf8');
-await RNFS.moveFile('/does/not/exist', dest); // rejects with ENOENT
-await RNFS.readFile(dest, 'utf8'); // still 'important'
-```
-
-A directory destination is also handled now: passing one appends the source filename rather
-than failing, and missing parent directories are created.
-
-#### `downloadFile`: the `resumable` callback is now `canBeResumed`
-
-```typescript
-// v3.x
-RNFS.downloadFile({ fromUrl, toFile, resumable: () => {} });
-
-// v4.x
-RNFS.downloadFile({ fromUrl, toFile, canBeResumed: (event) => {} });
-```
-
-An unmigrated `resumable: () => {}` is ignored — it never fires.
-
-#### `downloadFile` only writes `toFile` on a 2xx response
-
-A non-2xx response leaves `toFile` untouched — an existing file there is not replaced by the
-error body — and the promise resolves with the real status code and `bytesWritten: 0`. Check
-`statusCode` before treating the download as successful:
-
-```typescript
-const { promise } = RNFS.downloadFile({ fromUrl, toFile });
-const { statusCode, bytesWritten } = await promise;
-
-if (statusCode !== 200) {
-  // toFile was not written; whatever was there before is intact.
-}
-```
-
-This holds whether or not the server declares a `Content-Length`.
-
-#### `completeHandlerIOS` was removed
-
-There is no replacement in 4.0. Background downloads (`background: true`) still start on iOS,
-but the library cannot invoke the system completion handler when one finishes while the app is
-suspended. Treat background downloads as unsupported in 4.0 if you relied on that handler.
-
-#### `MainBundlePath`
-
-Still available, unchanged.
-
-### What Still Works
-
-✅ **Core file operations** — same call shape:
-```typescript
-await RNFS.readFile(path, 'utf8');
-await RNFS.writeFile(path, content, 'utf8');
-await RNFS.copyFile(src, dest);
-await RNFS.moveFile(src, dest);
-await RNFS.unlink(path);
-```
-
-Note the behaviour changes above for `copyFile`/`moveFile` (they overwrite now) — the
-signatures are unchanged but the outcome is not.
-
-✅ **`isFile()` / `isDirectory()`** on both `readDir()` items and `stat()` results — still
-methods, as in 3.x.
-
-✅ **Download API**, apart from the `resumable` → `canBeResumed` rename above. The promise
-still resolves `{ jobId, statusCode, bytesWritten }`, though `statusCode` and `bytesWritten`
-are now optional — a download stopped with `stopDownload()` settles without them:
-```typescript
-const { jobId, promise } = RNFS.downloadFile({
-  fromUrl: url,
-  toFile: path,
-  headers: { Authorization: 'Bearer ...' },
-  begin: (res) => { },
-  progress: (res) => { }
-});
-```
-
-### New Features to Explore
-
-Once migrated, you can optionally explore:
-
-- **File Streaming API**: For efficient large file operations (see [FILE_STREAM.md](./docs/FILE_STREAM.md))
-- **Better Performance**: Automatic via Nitro Modules architecture
-- **Enhanced Type Safety**: Full TypeScript support throughout
-
-### Need Help?
-
-If you encounter issues during migration:
-1. Check the [CHANGELOG.md](./CHANGELOG.md) for detailed changes
-2. Review [FILE_STREAM.md](./docs/FILE_STREAM.md) for streaming API
-3. Open an issue on [GitHub](https://github.com/sourcetoad/react-native-fs2/issues)
