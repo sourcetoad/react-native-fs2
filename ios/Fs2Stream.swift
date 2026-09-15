@@ -313,7 +313,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - Read Stream Methods
 
-  func createReadStream(path: String, options: ReadStreamOptions?) throws -> NitroModules.Promise<ReadStreamHandle> {
+  func createReadStream(path: String, options: ReadStreamOptions?) throws -> Promise<ReadStreamHandle> {
     return Promise.async {
       let fileURL = URL(fileURLWithPath: path)
       guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -329,7 +329,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func createWriteStream(path: String, options: WriteStreamOptions?) throws -> NitroModules.Promise<WriteStreamHandle> {
+  func createWriteStream(path: String, options: WriteStreamOptions?) throws -> Promise<WriteStreamHandle> {
     return Promise.async {
       let fileURL = URL(fileURLWithPath: path)
       if options?.createDirectories == true {
@@ -445,7 +445,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - Read Stream Control
 
-  func startReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func startReadStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
@@ -610,7 +610,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func pauseReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func pauseReadStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
@@ -628,7 +628,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func resumeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func resumeReadStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
@@ -649,7 +649,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func closeReadStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func closeReadStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.readStreams.removeValue(forKey: streamId) }) else {
         throw StreamError.invalidStream(streamId: streamId)
@@ -679,7 +679,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func isReadStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
+  func isReadStreamActive(streamId: String) throws -> Promise<Bool> {
     return Promise.async {
       guard let state = self.withRegistry({ self.readStreams[streamId] }) else {
         throw StreamError.invalidStream(streamId: streamId)
@@ -690,7 +690,7 @@ class Fs2Stream: HybridFs2StreamSpec {
 
   // MARK: - Write Stream Control
 
-  func writeToStream(streamId: String, data: NitroModules.ArrayBuffer) throws -> NitroModules.Promise<Void> {
+  func writeToStream(streamId: String, data: ArrayBuffer) throws -> Promise<Void> {
     // Buffers arriving from JS are non-owning and unsafe past this synchronous
     // call; ones that already own their memory need no copy at all.
     let copiedBuffer = data.asOwning()
@@ -723,7 +723,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func flushWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func flushWriteStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
@@ -742,7 +742,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func closeWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func closeWriteStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.writeStreams.removeValue(forKey: streamId) }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
@@ -768,7 +768,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func isWriteStreamActive(streamId: String) throws -> NitroModules.Promise<Bool> {
+  func isWriteStreamActive(streamId: String) throws -> Promise<Bool> {
     return Promise.async {
       guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
@@ -777,7 +777,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func getWriteStreamPosition(streamId: String) throws -> NitroModules.Promise<Int64> {
+  func getWriteStreamPosition(streamId: String) throws -> Promise<Int64> {
     return Promise.async {
       guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
@@ -786,7 +786,7 @@ class Fs2Stream: HybridFs2StreamSpec {
     }
   }
 
-  func endWriteStream(streamId: String) throws -> NitroModules.Promise<Void> {
+  func endWriteStream(streamId: String) throws -> Promise<Void> {
     return Promise.async {
       guard let state = self.withRegistry({ self.writeStreams[streamId] }) else {
         throw RuntimeError.error(withMessage: "ENOENT: No such write stream: \(streamId)")
