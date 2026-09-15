@@ -1,13 +1,22 @@
 # Changelog
 
-# v3.4.2 (March 9, 2025)
+# v4.0.0
+ * Rewritten on [Nitro Modules](https://nitro.margelo.com) — direct JSI bindings, end-to-end type safety.
+ * New file streaming API (beta) for large files, see [FILE_STREAM.md](./docs/FILE_STREAM.md).
+ * Native `ArrayBuffer` support for reads and writes; no extra dependencies required.
+ * Android modules rewritten in Kotlin; iOS in Swift.
+ * Ports [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs.
+ * (Android) `exists()` and `unlink()` now resolve `content://` URIs to the underlying file. In 3.x they operated on the raw string, so a content URI never existed and could not be unlinked.
+ * Requires `react-native-nitro-modules` and React Native >= 0.82.
+
+# v3.4.2 (March 9, 2026)
  * [#111](https://github.com/sourcetoad/react-native-fs2/pull/111) - Move CI to Node 24
 
-# v3.4.1 (March 9, 2025)
+# v3.4.1 (March 9, 2026)
  * [#109](https://github.com/sourcetoad/react-native-fs2/pull/109) - Fix OIDC publish
 
-# v3.4.0 (March 9, 2025)
- * [#82](https://github.com/sourcetoad/react-native-fs2/pull/92) - Upgrade to RN82.
+# v3.4.0 (March 9, 2026)
+ * [#92](https://github.com/sourcetoad/react-native-fs2/pull/92) - Upgrade to RN82.
  * [#103](https://github.com/sourcetoad/react-native-fs2/pull/103) - Adds Trusted Publishing
  * [#105](https://github.com/sourcetoad/react-native-fs2/pull/105) - Improve handling for Android Content URIs
 

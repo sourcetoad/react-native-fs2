@@ -1,72 +1,76 @@
-export type MkdirOptions = {
-  NSURLIsExcludedFromBackupKey?: boolean; // iOS only
-  NSFileProtectionKey?: string; // iOS only
-};
+import type {
+  DownloadFileOptions as DownloadFileOptionsNitro,
+  DownloadEventResult,
+  FileOptions,
+} from './nitro/Fs2.nitro';
+import type {
+  ReadStreamOptions as ReadStreamOptionsNitro,
+  WriteStreamOptions as WriteStreamOptionsNitro,
+  ReadStreamDataEvent as ReadStreamDataEventNitro,
+  ReadStreamProgressEvent as ReadStreamProgressEventNitro,
+  ReadStreamEndEvent as ReadStreamEndEventNitro,
+  WriteStreamProgressEvent as WriteStreamProgressEventNitro,
+  WriteStreamFinishEvent as WriteStreamFinishEventNitro,
+} from './nitro/Fs2Stream.nitro';
 
-export type FileOptions = {
-  NSFileProtectionKey?: string; // iOS only
-};
+export type Encoding = 'utf8' | 'ascii' | 'base64' | 'arraybuffer';
+// `fileProtection` rides alongside the encoding rather than in a parameter of its own,
+// because that is where 3.x put NSFileProtectionKey (master:src/index.ts:264-268). It is
+// read by writeFile only; the other readers ignore it.
+export type EncodingOrOptions =
+  | Encoding
+  | ({ encoding?: Encoding } & FileOptions);
 
+/**
+ * A `readDir` entry.
+ *
+ * `isFile`/`isDirectory` are accessors rather than plain booleans so that this matches
+ * `StatResult` and the 3.x API. The Nitro struct the native layer returns
+ * (`NativeReadDirItem`) carries them as booleans; `readDir` wraps them.
+ */
 export type ReadDirItem = {
-  ctime: Date | undefined; // The creation date of the file (iOS only)
-  mtime: Date | undefined; // The last modified date of the file
   name: string; // The name of the item
   path: string; // The absolute path to the item
   size: number; // Size in bytes
-  isFile: () => boolean; // Is the file just a file?
-  isDirectory: () => boolean; // Is the file a directory?
+  mtime: number; // Last modified, ms since epoch
+  ctime?: number; // Created, ms since epoch. Best effort: iOS provides it, Android omits it here
+  isFile: () => boolean; // Is the item just a file?
+  isDirectory: () => boolean; // Is the item a directory?
 };
 
-export type StatResult = {
-  type: any; // TODO
-  name: string | undefined; // The name of the item
-  path: string; // The absolute path to the item
-  size: number; // Size in bytes
-  mode: number; // UNIX file mode
-  ctime: number; // Created date
-  mtime: number; // Last modified date
-  originalFilepath: string; // In case of content uri this is the pointed file path, otherwise is the same as path
-  isFile: () => boolean; // Is the file just a file?
-  isDirectory: () => boolean; // Is the file a directory?
+/**
+ * Options accepted by `RNFS.downloadFile`.
+ *
+ * This is the consumer-facing shape, not the Nitro struct:
+ *
+ * - `jobId` is omitted. The wrapper allocates one and returns it alongside the promise, so
+ *   requiring callers to supply it made `downloadFile({ fromUrl, toFile })` - the 3.x call -
+ *   a type error.
+ * - `headers` lives here even though the Nitro method takes it as a separate argument. The
+ *   wrapper splits it back out.
+ * - The event callbacks are registered as Nitro listeners rather than forwarded natively.
+ */
+export type DownloadFileOptions = Omit<DownloadFileOptionsNitro, 'jobId'> & {
+  headers?: Record<string, string>; // Request headers to send to the server
+  begin?: (event: DownloadEventResult) => void;
+  progress?: (event: DownloadEventResult) => void;
+  complete?: (event: DownloadEventResult) => void;
+  error?: (event: DownloadEventResult) => void;
+  canBeResumed?: (event: DownloadEventResult) => void; // iOS only
 };
 
-export type Headers = { [name: string]: string };
-export type Fields = { [name: string]: string };
-
-export type DownloadFileOptions = {
-  fromUrl: string; // URL to download file from
-  toFile: string; // Local filesystem path to save the file to
-  headers?: Headers; // An object of headers to be passed to the server
-  background?: boolean; // Continue the download in the background after the app terminates (iOS only)
-  discretionary?: boolean; // Allow the OS to control the timing and speed of the download to improve perceived performance  (iOS only)
-  cacheable?: boolean; // Whether the download can be stored in the shared NSURLCache (iOS only)
-  progressInterval?: number;
-  progressDivider?: number;
-  begin?: (res: DownloadBeginCallbackResult) => void; // Note: it is required when progress prop provided
-  progress?: (res: DownloadProgressCallbackResult) => void;
-  resumable?: () => void; // only supported on iOS
-  connectionTimeout?: number; // only supported on Android
-  readTimeout?: number; // supported on Android and iOS
-  backgroundTimeout?: number; // Maximum time (in milliseconds) to download an entire resource (iOS only, useful for timing out background downloads)
-};
-
-export type DownloadBeginCallbackResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  statusCode: number; // The HTTP status code
-  contentLength: number; // The total size in bytes of the download resource
-  headers: Headers; // The HTTP response headers from the server
-};
-
-export type DownloadProgressCallbackResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  contentLength: number; // The total size in bytes of the download resource
-  bytesWritten: number; // The number of bytes written to the file so far
-};
-
+/**
+ * What `downloadFile().promise` resolves to.
+ *
+ * `statusCode`/`bytesWritten` are optional, unlike 3.x which declared them required. That
+ * declaration was wrong even on 3.x - its iOS native only attached each key when the value was
+ * non-nil (master:ios/RNFSManager.m:501-508) - and a download stopped through `stopDownload()`
+ * settles with neither.
+ */
 export type DownloadResult = {
-  jobId: number; // The download jobId, required if one wishes to cancel the download. See `stopDownload`.
-  statusCode: number; // The HTTP status code
-  bytesWritten: number; // The number of bytes written to the file
+  jobId: number;
+  statusCode?: number;
+  bytesWritten?: number;
 };
 
 export type DownloadFileResult = {
@@ -74,29 +78,80 @@ export type DownloadFileResult = {
   promise: Promise<DownloadResult>;
 };
 
-export type FSInfoResult = {
-  totalSpace: number; // The total amount of storage space on the device (in bytes).
-  freeSpace: number; // The amount of available storage space on the device (in bytes).
+export type StatResult = {
+  type?: any; // TODO
+  name?: string; // The name of the item
+  path: string; // The absolute path to the item
+  size: number; // Size in bytes
+  mode: number; // UNIX file mode
+  ctime: number; // Created, ms since epoch
+  mtime: number; // Last modified, ms since epoch
+  originalFilepath: string; // In case of content uri this is the pointed file path, otherwise is the same as path
+  isFile: () => boolean; // Is the file just a file?
+  isDirectory: () => boolean; // Is the file a directory?
 };
 
-export type FileDescriptor = {
-  name: string;
-  parentFolder: string;
-  mimeType: string;
-};
+export interface ReadStreamOptions {
+  bufferSize?: number;
+  start?: number;
+  end?: number;
+}
 
-export type MediaStoreSearchOptions = {
-  uri: string;
-  fileName: string;
-  relativePath: string;
-  mediaType: MediaCollections;
-};
+export interface WriteStreamOptions {
+  append?: boolean;
+  bufferSize?: number;
+  createDirectories?: boolean;
+}
 
-export type MediaStoreQueryResult = {
-  contentUri: string;
-};
+// Stream event types
+export interface ReadStreamDataEvent {
+  streamId: string;
+  data: ArrayBuffer;
+  chunk: number;
+  position: number;
+}
 
-export type Encoding = 'utf8' | 'base64' | 'ascii' | 'arraybuffer';
-export type EncodingOrOptions = Encoding | Record<string, any>;
-export type ProcessedOptions = Record<string, any | Encoding>;
-export type MediaCollections = 'Audio' | 'Image' | 'Video' | 'Download';
+export interface ReadStreamProgressEvent {
+  streamId: string;
+  bytesRead: number;
+  totalBytes: number;
+  progress: number;
+}
+
+export interface ReadStreamEndEvent {
+  streamId: string;
+  bytesRead: number;
+  success: boolean;
+}
+
+export interface WriteStreamProgressEvent {
+  streamId: string;
+  bytesWritten: number;
+  lastChunkSize: number;
+}
+
+export interface WriteStreamFinishEvent {
+  streamId: string;
+  bytesWritten: number;
+  success: boolean;
+}
+
+export type DataEventPlain =
+  | ReadStreamDataEvent
+  | ReadStreamProgressEvent
+  | ReadStreamEndEvent
+  | WriteStreamProgressEvent
+  | WriteStreamFinishEvent;
+
+export type DataEventNitro =
+  | ReadStreamDataEventNitro
+  | ReadStreamProgressEventNitro
+  | ReadStreamEndEventNitro
+  | WriteStreamProgressEventNitro
+  | WriteStreamFinishEventNitro;
+
+export type StreamOptionPlain = ReadStreamOptions | WriteStreamOptions;
+
+export type StreamOptionNitro =
+  | ReadStreamOptionsNitro
+  | WriteStreamOptionsNitro;

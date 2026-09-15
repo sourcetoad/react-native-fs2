@@ -1,247 +1,199 @@
-import { EmitterSubscription, NativeEventEmitter, NativeModules, Platform } from 'react-native';
-import { decode as atob, encode as btoa } from 'base-64';
-import { decode as decode_utf8, encode as encode_utf8 } from 'utf8';
+import { NitroModules } from 'react-native-nitro-modules';
+import type { Fs2 } from './nitro/Fs2.nitro';
 import type {
   MkdirOptions,
   FileOptions,
   FSInfoResult,
-  ReadDirItem,
-  StatResult,
+  ReadDirItem as NativeReadDirItem,
+  DownloadEventResult,
+  NativeStatResult,
+  HashAlgorithm,
+} from './nitro/Fs2.nitro';
+import type {
   DownloadFileOptions,
   DownloadFileResult,
-  Encoding,
   EncodingOrOptions,
-  ProcessedOptions,
-  FileDescriptor,
-  MediaCollections,
-  MediaStoreSearchOptions,
-  MediaStoreQueryResult,
+  ReadDirItem,
+  StatResult,
 } from './types';
 
-let blobJSIHelper: any;
-try {
-  blobJSIHelper = require('react-native-blob-jsi-helper');
-} catch (e) {
-  // ignore
-  blobJSIHelper = null;
-}
+/**
+ * Re-export types
+ */
+export type {
+  StatResultType,
+  MkdirOptions,
+  FileOptions,
+  FSInfoResult,
+  DownloadEventResult,
+  HashAlgorithm,
+  FileProtectionType,
+  NativeStatResult,
+} from './nitro/Fs2.nitro';
 
-const RNFSManager = NativeModules.RNFSManager;
-const RNFSMediaStoreManager = NativeModules.RNFSMediaStoreManager;
-const RNFS_NativeEventEmitter = new NativeEventEmitter(RNFSManager);
+export type {
+  DownloadFileOptions,
+  DownloadFileResult,
+  DownloadResult,
+  ReadDirItem,
+  StatResult,
+} from './types';
 
-// Since we are mapping enums from their native counterpart. We must allow these to fail if run
-// in say jest or without the native component.
-const RNFSFileTypeRegular = RNFSManager?.RNFSFileTypeRegular;
-const RNFSFileTypeDirectory = RNFSManager?.RNFSFileTypeDirectory;
+export type {
+  MediaCollectionType,
+  FileDescription,
+  MediaStoreFile,
+  MediaStoreSearchOptions,
+} from './nitro/MediaStore.nitro';
 
+/**
+ * Helpers
+ */
+import {
+  encodeContents,
+  decodeContents,
+  normalizeFilePath,
+  parseOptions,
+} from './utils';
+
+/**
+ * Nitro Hybrid Objects
+ */
+const RNFS2Nitro = NitroModules.createHybridObject<Fs2>('Fs2');
+
+/**
+ * Download job/event management
+ */
 let globalJobId = 0;
+const getJobId = () => ++globalJobId;
 
-const getJobId = () => {
-  globalJobId += 1;
-  return globalJobId;
+/**
+ * How long `downloadFile`'s promise waits for the `complete` event after native has settled.
+ * Only reached when the event has not already arrived, which in practice means iOS ordering or
+ * a download that will never report completion.
+ */
+const COMPLETION_GRACE_MS = 250;
+
+const downloadListeners = {
+  begin: new Map<number, (event: DownloadEventResult) => void>(),
+  progress: new Map<number, (event: DownloadEventResult) => void>(),
+  complete: new Map<number, (event: DownloadEventResult) => void>(),
+  error: new Map<number, (event: DownloadEventResult) => void>(),
+  canBeResumed: new Map<number, (event: DownloadEventResult) => void>(),
 };
 
-const normalizeFilePath = (path: string) => (path.startsWith('file://') ? path.slice(7) : path);
+/**
+ * Both platforms emit `ctime`/`mtime` as whole seconds since the epoch - iOS from
+ * `timeIntervalSince1970`, Android from `lastModified() / 1000`. JS dates are milliseconds, so
+ * convert at this boundary exactly as 3.x did (master:src/index.ts:209-210, 224-225) rather
+ * than leaving every caller to remember the factor. `undefined` passes through untouched:
+ * Android's `readDir` does not populate `ctime`.
+ *
+ * Rounded because iOS carries sub-second precision - `stat` there is a `Double`
+ * `timeIntervalSince1970`, so the raw product is fractional (1788157346187.1887) while Android
+ * is always whole. A timestamp "in milliseconds" should be an integer on both.
+ */
+const secondsToMs = <T extends number | undefined>(seconds: T): T =>
+  (seconds === undefined ? undefined : Math.round(seconds * 1000)) as T;
 
-function parseOptions(encodingOrOptions?: EncodingOrOptions): ProcessedOptions {
-  let options = {
-    encoding: 'utf8' as Encoding,
-  };
-
-  if (!encodingOrOptions) {
-    return options;
-  }
-
-  if (typeof encodingOrOptions === 'string') {
-    options.encoding = encodingOrOptions as Encoding;
-  } else if (typeof encodingOrOptions === 'object') {
-    options = {
-      ...options,
-      ...encodingOrOptions,
-    };
-  }
-
-  return options;
-}
-
-function encodeContents(contents: string, encoding: Encoding): string {
-  if (encoding === 'utf8') {
-    return btoa(encode_utf8(contents));
-  }
-
-  if (encoding === 'ascii') {
-    return btoa(contents);
-  }
-
-  if (encoding === 'base64') {
-    return contents;
-  }
-
-  throw new Error('Invalid encoding type "' + String(encoding) + '"');
-}
-
-function decodeContents(b64: string, encoding: Encoding): string {
-  if (encoding === 'utf8') {
-    return atob(decode_utf8(b64));
-  }
-
-  if (encoding === 'ascii') {
-    return atob(b64);
-  }
-
-  if (encoding === 'base64') {
-    return b64;
-  }
-
-  throw new Error('Invalid encoding type "' + String(encoding) + '"');
-}
-
-function getArrayBuffer(filePath: string): Promise<ArrayBuffer> {
-  return new Promise(async (resolve, reject) => {
-    if (!blobJSIHelper) {
-      reject(new Error('react-native-blob-jsi-helper is not installed'));
-      return;
-    }
-
-    let originalFilepath = filePath;
-    if (filePath.includes('content://')) {
-      const stat = await RNFSManager.stat(normalizeFilePath(filePath));
-
-      if (stat.originalFilepath.includes('file://')) {
-        originalFilepath = stat.originalFilepath;
-      } else {
-        originalFilepath = `file://${stat.originalFilepath}`;
-      }
-    }
-
-    fetch(originalFilepath)
-      .then((response) => response.blob())
-      .then((blob) => {
-        resolve(blobJSIHelper.getArrayBufferForBlob(blob));
-      })
-      .catch((error) => {
-        reject(error);
-      });
-  });
-}
-
-const MediaStore = {
-  createMediaFile(fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string> {
-    if (!fileDescriptor.parentFolder) fileDescriptor.parentFolder = '';
-    return RNFSMediaStoreManager.createMediaFile(fileDescriptor, mediatype);
+/**
+ * Legacy-compatible API
+ */
+const compat = {
+  mkdir(filepath: string, options: MkdirOptions = {}): Promise<void> {
+    return RNFS2Nitro.mkdir(normalizeFilePath(filepath), options);
   },
 
-  updateMediaFile(uri: string, fileDescriptor: FileDescriptor, mediatype: MediaCollections): Promise<string> {
-    return RNFSMediaStoreManager.updateMediaFile(uri, fileDescriptor, mediatype);
+  moveFile(
+    filepath: string,
+    destPath: string,
+    options: FileOptions = {}
+  ): Promise<void> {
+    return RNFS2Nitro.moveFile(
+      normalizeFilePath(filepath),
+      normalizeFilePath(destPath),
+      options
+    );
   },
 
-  writeToMediaFile(uri: string, path: string): Promise<void> {
-    return RNFSMediaStoreManager.writeToMediaFile(uri, normalizeFilePath(path), false);
-  },
-
-  copyToMediaStore(fileDescriptor: FileDescriptor, mediatype: MediaCollections, path: string): Promise<string> {
-    return RNFSMediaStoreManager.copyToMediaStore(fileDescriptor, mediatype, normalizeFilePath(path));
-  },
-
-  queryMediaStore(searchOptions: MediaStoreSearchOptions): Promise<MediaStoreQueryResult> {
-    return RNFSMediaStoreManager.query(searchOptions);
-  },
-
-  deleteFromMediaStore(uri: string): Promise<boolean> {
-    return RNFSMediaStoreManager.delete(uri);
-  },
-
-  MEDIA_AUDIO: 'Audio' as MediaCollections,
-  MEDIA_IMAGE: 'Image' as MediaCollections,
-  MEDIA_VIDEO: 'Video' as MediaCollections,
-  MEDIA_DOWNLOAD: 'Download' as MediaCollections,
-};
-
-export default {
-  mkdir(filepath: string, options: MkdirOptions = {}): Promise<undefined> {
-    return RNFSManager.mkdir(normalizeFilePath(filepath), options).then(() => void 0);
-  },
-
-  moveFile(filepath: string, destPath: string, options: FileOptions = {}): Promise<undefined> {
-    return RNFSManager.moveFile(normalizeFilePath(filepath), normalizeFilePath(destPath), options).then(() => void 0);
-  },
-
-  copyFile(filepath: string, destPath: string, options: FileOptions = {}): Promise<undefined> {
-    return RNFSManager.copyFile(normalizeFilePath(filepath), normalizeFilePath(destPath), options).then(() => void 0);
+  copyFile(
+    filepath: string,
+    destPath: string,
+    options: FileOptions = {}
+  ): Promise<void> {
+    return RNFS2Nitro.copyFile(
+      normalizeFilePath(filepath),
+      normalizeFilePath(destPath),
+      options
+    );
   },
 
   getFSInfo(): Promise<FSInfoResult> {
-    return RNFSManager.getFSInfo();
+    return RNFS2Nitro.getFSInfo();
   },
 
   getAllExternalFilesDirs(): Promise<string[]> {
-    return RNFSManager.getAllExternalFilesDirs();
+    return RNFS2Nitro.getAllExternalFilesDirs();
   },
 
   unlink(filepath: string): Promise<void> {
-    return RNFSManager.unlink(normalizeFilePath(filepath)).then(() => void 0);
+    return RNFS2Nitro.unlink(normalizeFilePath(filepath));
   },
 
   exists(filepath: string): Promise<boolean> {
-    return RNFSManager.exists(normalizeFilePath(filepath));
+    return RNFS2Nitro.exists(normalizeFilePath(filepath));
   },
 
-  stopDownload(jobId: number): void {
-    RNFSManager.stopDownload(jobId);
+  stopDownload(jobId: number): Promise<void> {
+    return RNFS2Nitro.stopDownload(jobId);
   },
 
-  resumeDownload(jobId: number): void {
-    RNFSManager.resumeDownload(jobId);
+  resumeDownload(jobId: number): Promise<void> {
+    return RNFS2Nitro.resumeDownload(jobId);
   },
 
   isResumable(jobId: number): Promise<boolean> {
-    return RNFSManager.isResumable(jobId);
-  },
-
-  completeHandlerIOS(jobId: number): void {
-    return RNFSManager.completeHandlerIOS(jobId);
+    return RNFS2Nitro.isResumable(jobId);
   },
 
   readDir(dirPath: string): Promise<ReadDirItem[]> {
-    return RNFSManager.readDir(normalizeFilePath(dirPath)).then((files: any[]) => {
-      return files.map((file) => ({
-        ctime: (file.ctime && new Date(file.ctime * 1000)) || null,
-        mtime: (file.mtime && new Date(file.mtime * 1000)) || null,
-        name: file.name,
-        path: file.path,
-        size: file.size,
-        isFile: () => file.type === RNFSFileTypeRegular,
-        isDirectory: () => file.type === RNFSFileTypeDirectory,
-      }));
-    });
+    return RNFS2Nitro.readDir(normalizeFilePath(dirPath)).then(
+      (items: NativeReadDirItem[]) =>
+        items.map((item) => ({
+          name: item.name,
+          path: item.path,
+          size: item.size,
+          mtime: secondsToMs(item.mtime),
+          ctime: secondsToMs(item.ctime),
+          isFile: () => item.isFile,
+          isDirectory: () => item.isDirectory,
+        }))
+    );
   },
 
   stat(filepath: string): Promise<StatResult> {
-    return RNFSManager.stat(normalizeFilePath(filepath)).then((result: StatResult) => {
-      return {
+    return RNFS2Nitro.stat(normalizeFilePath(filepath)).then(
+      (result: NativeStatResult) => ({
         path: filepath,
-        ctime: new Date(result.ctime * 1000),
-        mtime: new Date(result.mtime * 1000),
+        ctime: secondsToMs(result.ctime),
+        mtime: secondsToMs(result.mtime),
         size: result.size,
-        mode: result.mode,
+        mode: result.mode ?? 0,
         originalFilepath: result.originalFilepath,
-        isFile: () => result.type === RNFSFileTypeRegular,
-        isDirectory: () => result.type === RNFSFileTypeDirectory,
-      };
-    });
+        isFile: () => result.type === 'file',
+        isDirectory: () => result.type === 'directory',
+      })
+    );
   },
 
-  readFile(filepath: string, encodingOrOptions?: EncodingOrOptions): Promise<string | ArrayBuffer> {
+  readFile(
+    filepath: string,
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<string | ArrayBuffer> {
     const options = parseOptions(encodingOrOptions);
-
-    if (options.encoding === 'arraybuffer') {
-      return getArrayBuffer(filepath);
-    }
-
-    return RNFSManager.readFile(normalizeFilePath(filepath)).then((b64: string) => {
-      return decodeContents(b64, options.encoding);
-    });
+    return RNFS2Nitro.readFile(normalizeFilePath(filepath)).then((buffer) =>
+      decodeContents(buffer, options.encoding)
+    );
   },
 
   read(
@@ -249,131 +201,221 @@ export default {
     length: number = 0,
     position: number = 0,
     encodingOrOptions?: EncodingOrOptions
-  ): Promise<string> {
+  ): Promise<string | ArrayBuffer> {
     const options = parseOptions(encodingOrOptions);
-
-    return RNFSManager.read(normalizeFilePath(filepath), length, position).then((b64: string) => {
-      return decodeContents(b64, options.encoding);
-    });
+    return RNFS2Nitro.read(normalizeFilePath(filepath), length, position).then(
+      (buffer) => decodeContents(buffer, options.encoding)
+    );
   },
 
-  hash(filepath: string, algorithm: string): Promise<string> {
-    return RNFSManager.hash(normalizeFilePath(filepath), algorithm);
+  writeFile(
+    filepath: string,
+    contents: string,
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<void> {
+    const { encoding, ...fileOptions } = parseOptions(encodingOrOptions);
+    const data = encodeContents(contents, encoding);
+
+    return RNFS2Nitro.writeFile(
+      normalizeFilePath(filepath),
+      data as ArrayBuffer,
+      fileOptions
+    );
   },
 
-  writeFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void> {
+  appendFile(
+    filepath: string,
+    contents: string,
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<void> {
     const options = parseOptions(encodingOrOptions);
-    const b64 = encodeContents(contents, options.encoding);
-
-    return RNFSManager.writeFile(normalizeFilePath(filepath), b64, options);
+    const data = encodeContents(contents, options.encoding);
+    return RNFS2Nitro.appendFile(
+      normalizeFilePath(filepath),
+      data as ArrayBuffer
+    );
   },
 
-  appendFile(filepath: string, contents: string, encodingOrOptions?: EncodingOrOptions): Promise<void> {
+  write(
+    filepath: string,
+    contents: string,
+    position?: number,
+    encodingOrOptions?: EncodingOrOptions
+  ): Promise<void> {
     const options = parseOptions(encodingOrOptions);
-    const b64 = encodeContents(contents, options.encoding);
-
-    return RNFSManager.appendFile(normalizeFilePath(filepath), b64);
+    const data = encodeContents(contents, options.encoding);
+    return RNFS2Nitro.write(
+      normalizeFilePath(filepath),
+      data as ArrayBuffer,
+      position
+    );
   },
 
-  write(filepath: string, contents: string, position?: number, encodingOrOptions?: EncodingOrOptions): Promise<null> {
-    const options = parseOptions(encodingOrOptions);
-    const b64 = encodeContents(contents, options.encoding);
+  hash(filepath: string, algorithm: HashAlgorithm): Promise<string> {
+    return RNFS2Nitro.hash(normalizeFilePath(filepath), algorithm);
+  },
 
-    if (position === undefined) {
-      position = -1;
-    }
+  touch(filepath: string, mtime?: Date, ctime?: Date): Promise<void> {
+    return RNFS2Nitro.touch(
+      normalizeFilePath(filepath),
+      mtime?.getTime(),
+      ctime?.getTime()
+    );
+  },
 
-    return RNFSManager.write(normalizeFilePath(filepath), b64, position).then(() => void 0);
+  scanFile(path: string): Promise<string[]> {
+    return RNFS2Nitro.scanFile(path);
   },
 
   downloadFile(options: DownloadFileOptions): DownloadFileResult {
     const jobId = getJobId();
-    let subscriptions: EmitterSubscription[] = [];
+    const subscriptions: Array<() => void> = [];
+
+    // The Nitro method resolves the jobId alone - completion data travels over the
+    // `listenToDownloadComplete` event by design (MIGRATION_CHECKLIST.md:40). 3.x resolved
+    // `{ jobId, statusCode, bytesWritten }`, so capture the event here and rebuild that shape
+    // rather than handing callers a bare number they would have to notice.
+    let completion: DownloadEventResult | undefined;
+    let completionArrived!: () => void;
+    const completionSettled = new Promise<void>((resolve) => {
+      completionArrived = resolve;
+    });
 
     if (options.begin) {
+      downloadListeners.begin.set(jobId, options.begin);
       subscriptions.push(
-        RNFS_NativeEventEmitter.addListener('DownloadBegin', (res) => {
-          if (res.jobId === jobId) {
-            // @ts-ignore
-            options.begin(res);
-          }
+        RNFS2Nitro.listenToDownloadBegin(jobId, (event) => {
+          const cb = downloadListeners.begin.get(event.jobId);
+          if (cb) cb(event);
         })
       );
     }
-
     if (options.progress) {
+      downloadListeners.progress.set(jobId, options.progress);
       subscriptions.push(
-        RNFS_NativeEventEmitter.addListener('DownloadProgress', (res) => {
-          if (res.jobId === jobId) {
-            // @ts-ignore
-            options.progress(res);
-          }
+        RNFS2Nitro.listenToDownloadProgress(jobId, (event) => {
+          const cb = downloadListeners.progress.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    // Registered unconditionally, unlike the other four: the promise needs this event even
+    // when the caller passed no `complete` callback.
+    downloadListeners.complete.set(jobId, (event) => {
+      completion = event;
+      completionArrived();
+      options.complete?.(event);
+    });
+    subscriptions.push(
+      RNFS2Nitro.listenToDownloadComplete(jobId, (event) => {
+        const cb = downloadListeners.complete.get(event.jobId);
+        if (cb) cb(event);
+      })
+    );
+    if (options.error) {
+      downloadListeners.error.set(jobId, options.error);
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadError(jobId, (event) => {
+          const cb = downloadListeners.error.get(event.jobId);
+          if (cb) cb(event);
+        })
+      );
+    }
+    if (options.canBeResumed) {
+      downloadListeners.canBeResumed.set(jobId, options.canBeResumed);
+      subscriptions.push(
+        RNFS2Nitro.listenToDownloadCanBeResumed(jobId, (event) => {
+          const cb = downloadListeners.canBeResumed.get(event.jobId);
+          if (cb) cb(event);
         })
       );
     }
 
-    if (options.resumable) {
-      subscriptions.push(
-        RNFS_NativeEventEmitter.addListener('DownloadResumable', (res) => {
-          if (res.jobId === jobId) {
-            // @ts-ignore
-            options.resumable(res);
-          }
-        })
-      );
-    }
-
-    const bridgeOptions = {
+    const nitroOptions = {
       jobId: jobId,
       fromUrl: options.fromUrl,
       toFile: normalizeFilePath(options.toFile),
-      headers: options.headers || {},
       background: !!options.background,
+      // Passed through rather than coerced: iOS treats an explicit `false` differently from
+      // "not set" (Downloader.swift:63,70,110).
+      discretionary: options.discretionary,
+      cacheable: options.cacheable,
       progressDivider: options.progressDivider || 0,
       progressInterval: options.progressInterval || 0,
       readTimeout: options.readTimeout || 15000,
       connectionTimeout: options.connectionTimeout || 5000,
       backgroundTimeout: options.backgroundTimeout || 3600000, // 1 hour
-      hasBeginCallback: options.begin instanceof Function,
-      hasProgressCallback: options.progress instanceof Function,
-      hasResumableCallback: options.resumable instanceof Function,
+    };
+
+    // Both the Nitro unsubscribes and this jobId's entries in `downloadListeners`, which would
+    // otherwise accumulate for the lifetime of the module.
+    const release = () => {
+      subscriptions.forEach((unsubscribe) => unsubscribe());
+      downloadListeners.begin.delete(jobId);
+      downloadListeners.progress.delete(jobId);
+      downloadListeners.complete.delete(jobId);
+      downloadListeners.error.delete(jobId);
+      downloadListeners.canBeResumed.delete(jobId);
     };
 
     return {
       jobId,
-      promise: RNFSManager.downloadFile(bridgeOptions)
-        .then((res: any) => {
-          subscriptions.forEach((sub) => sub.remove());
-          return res;
+      // `headers` is a separate argument on the Nitro method, not a field of the options
+      // struct. Both platforms read it; passing only one argument silently dropped it.
+      promise: RNFS2Nitro.downloadFile(nitroOptions, options.headers)
+        .then(async (resolvedJobId: number) => {
+          // Native fires `complete` before it settles the promise, but the two cross into JS
+          // independently and on iOS the event can arrive a beat later. Waiting for it beats
+          // reporting an undefined statusCode; the race caps the wait for the cases where no
+          // complete event is coming at all, such as a download ended by stopDownload().
+          if (!completion) {
+            await Promise.race([
+              completionSettled,
+              new Promise<void>((resolve) =>
+                setTimeout(resolve, COMPLETION_GRACE_MS)
+              ),
+            ]);
+          }
+
+          release();
+
+          return {
+            jobId: completion?.jobId ?? resolvedJobId,
+            statusCode: completion?.statusCode,
+            bytesWritten: completion?.bytesWritten,
+          };
         })
         .catch((e: any) => {
+          release();
           return Promise.reject(e);
         }),
     };
   },
 
-  touch(filepath: string, mtime?: Date, ctime?: Date): Promise<void> {
-    let ctimeTime: undefined | number = 0;
-    if (Platform.OS === 'ios') {
-      ctimeTime = ctime && ctime.getTime();
-    }
-    return RNFSManager.touch(normalizeFilePath(filepath), mtime && mtime.getTime(), ctimeTime);
-  },
-
-  scanFile(path: string): Promise<string[]> {
-    return RNFSManager.scanFile(path);
-  },
-
-  MediaStore,
-
-  MainBundlePath: RNFSManager.RNFSMainBundlePath as String,
-  CachesDirectoryPath: RNFSManager.RNFSCachesDirectoryPath as String,
-  ExternalCachesDirectoryPath: RNFSManager.RNFSExternalCachesDirectoryPath as String,
-  DocumentDirectoryPath: RNFSManager.RNFSDocumentDirectoryPath as String,
-  DownloadDirectoryPath: RNFSManager.RNFSDownloadDirectoryPath as String,
-  ExternalDirectoryPath: RNFSManager.RNFSExternalDirectoryPath as String,
-  ExternalStorageDirectoryPath: RNFSManager.RNFSExternalStorageDirectoryPath as String,
-  TemporaryDirectoryPath: RNFSManager.RNFSTemporaryDirectoryPath as String,
-  LibraryDirectoryPath: RNFSManager.RNFSLibraryDirectoryPath as String,
-  PicturesDirectoryPath: RNFSManager.RNFSPicturesDirectoryPath as String,
+  // --- Constants ---
+  CachesDirectoryPath: RNFS2Nitro.cachesDirectoryPath,
+  ExternalCachesDirectoryPath: RNFS2Nitro.externalCachesDirectoryPath,
+  DocumentDirectoryPath: RNFS2Nitro.documentDirectoryPath,
+  DownloadDirectoryPath: RNFS2Nitro.downloadDirectoryPath,
+  ExternalDirectoryPath: RNFS2Nitro.externalDirectoryPath,
+  ExternalStorageDirectoryPath: RNFS2Nitro.externalStorageDirectoryPath,
+  TemporaryDirectoryPath: RNFS2Nitro.temporaryDirectoryPath,
+  LibraryDirectoryPath: RNFS2Nitro.libraryDirectoryPath,
+  MainBundlePath: RNFS2Nitro.mainBundlePath,
+  PicturesDirectoryPath: RNFS2Nitro.picturesDirectoryPath,
 };
+
+/**
+ * MediaStore
+ */
+export { default as MediaStore } from './_mediastore';
+
+/**
+ * File Stream API
+ */
+export * from './_filestream';
+
+/**
+ * Default export
+ */
+export default compat;

@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "jest"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "builtin": true,
+    "es2021": true,
+    "jest": true
+  },
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "jest/require-to-throw-message": "warn",
+    "react/set-state-in-effect": "warn"
+  },
+  "ignorePatterns": ["lib/", "nitrogen/generated/", "example/ios/", "example/android/"]
+}

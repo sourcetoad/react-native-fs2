@@ -1,0 +1,935 @@
+import CommonCrypto
+import Foundation
+import NitroModules
+
+class Fs2: HybridFs2Spec {
+  public let cachesDirectoryPath: String
+  public let documentDirectoryPath: String
+  public let temporaryDirectoryPath: String
+  public let libraryDirectoryPath: String
+  public let mainBundlePath: String
+  // Empty on iOS, like every other constant that does not apply to the platform. iOS defines a
+  // .picturesDirectory search path, but nothing in the app sandbox uses it and the directory
+  // does not exist - returning it would be truthy and unusable, so `if (RNFS.PicturesDirectoryPath)`
+  // would pass and then fail at the filesystem call. 3.x omitted the key entirely
+  // (master:ios/RNFSManager.m:682-696), making it `undefined` and therefore falsy.
+  public let picturesDirectoryPath: String = ""
+  public let externalCachesDirectoryPath: String = ""
+  public let downloadDirectoryPath: String = ""
+  public let externalDirectoryPath: String = ""
+  public let externalStorageDirectoryPath: String = ""
+  
+  private let downloaderQueue = DispatchQueue(label: "com.margelo.nitro.fs2.downloaderQueue")
+  
+  // Downloader instance
+  private let downloader = Downloader()
+  
+  // Store DownloadCallbacksHolder per jobId
+  private var beginListeners: [Double: (DownloadEventResult) -> Void] = [:]
+  private var progressListeners: [Double: (DownloadEventResult) -> Void] = [:]
+  private var completeListeners: [Double: (DownloadEventResult) -> Void] = [:]
+  private var errorListeners: [Double: (DownloadEventResult) -> Void] = [:]
+  private var canBeResumedListeners: [Double: (DownloadEventResult) -> Void] = [:]
+  
+  // Downloader instances per jobId
+  private var downloaders: [Int: Downloader] = [:]
+  // Store Promises per jobId for downloadFile
+  private var downloadPromises: [Int: (resolve: (Double) -> Void, reject: (Error) -> Void)] = [:]
+  
+  // Store continuations per jobId for downloadFile
+  private var downloadContinuations: [Int: CheckedContinuation<Double, Error>] = [:]
+  
+  override init() {
+    self.cachesDirectoryPath = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.path ?? ""
+    self.documentDirectoryPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.path ?? ""
+    self.temporaryDirectoryPath = NSTemporaryDirectory()
+    self.libraryDirectoryPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?.path ?? ""
+    self.mainBundlePath = Bundle.main.bundlePath
+    super.init()
+    self.downloader.delegate = self
+  }
+  
+  func readFile(filepath: String) -> Promise<ArrayBuffer> {
+    return Promise<ArrayBuffer>.async {
+      let fileManager = FileManager.default
+      var isDir: ObjCBool = false
+      
+      guard fileManager.fileExists(atPath: filepath, isDirectory: &isDir) else {
+        // Match original library's ENOENT error for file not found
+        throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(filepath)'")
+      }
+      
+      guard !isDir.boolValue else {
+        // Match original library's EISDIR error for path is a directory
+        throw RuntimeError.error(withMessage: "EISDIR: path is a directory, not a file: \(filepath)")
+      }
+      
+      do {
+        let fileData = try Data(contentsOf: URL(fileURLWithPath: filepath))
+        let arrayBufferHolder = try ArrayBuffer.copy(data: fileData)
+        return arrayBufferHolder
+      } catch {
+        // Catch other potential errors during file reading (e.g., permissions)
+        throw RuntimeError.error(withMessage: "EREAD: Failed to read file at path \(filepath): \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  func writeFile(filepath: String, data: ArrayBuffer, options: FileOptions?) -> Promise<Void> {
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous
+    // call; ones that already own their memory need no copy at all.
+    let copiedBuffer = data.asOwning()
+
+    return Promise<Void>.async {
+      let fileManager = FileManager.default
+      var isDir: ObjCBool = false
+      
+      // Check if path is a directory
+      if fileManager.fileExists(atPath: filepath, isDirectory: &isDir) && isDir.boolValue {
+        throw RuntimeError.error(withMessage: "EISDIR: path is a directory, cannot write file: \(filepath)")
+      }
+      
+      // Check if parent directory exists, create if not.
+      // This behavior is common in file system libraries, ensuring the path is writable.
+      let parentDirectoryURL = URL(fileURLWithPath: filepath).deletingLastPathComponent()
+      if !fileManager.fileExists(atPath: parentDirectoryURL.path) {
+        do {
+          try fileManager.createDirectory(at: parentDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+        } catch {
+          throw RuntimeError.error(withMessage: "EMKDIRP: Failed to create parent directories for path \(filepath): \(error.localizedDescription)")
+        }
+      }
+      
+      let fileData = copiedBuffer.toData(copyIfNeeded: true) // Convert ArrayBuffer to Data
+      let attributes = Self.protectionAttributes(options?.fileProtection)
+
+      // Two paths on purpose. `Data.write(to:)` cannot set attributes, and applying protection
+      // after the write would leave the contents briefly readable at the default protection
+      // level. `createFile` sets them as the file is created, which is what 3.x did
+      // (master:ios/RNFSManager.m:121). It reports only a Bool though, so the richer error from
+      // `write(to:)` is kept for the far more common unprotected write.
+      if attributes.isEmpty {
+        do {
+          try fileData.write(to: URL(fileURLWithPath: filepath))
+          return // Return Void on success
+        } catch {
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath): \(error.localizedDescription)")
+        }
+      }
+
+      guard fileManager.createFile(atPath: filepath, contents: fileData, attributes: attributes) else {
+        throw RuntimeError.error(withMessage: "EWRITE: Failed to write file to path \(filepath)")
+      }
+      return // Return Void on success
+    }
+  }
+  
+  func mkdir(filepath: String, options: MkdirOptions?) -> Promise<Void> {
+    return Promise<Void>.async {
+      let fileManager = FileManager.default
+      // `excludedFromBackup` maps to NSURLIsExcludedFromBackupKey, which applies to a URL
+      // rather than to createDirectory's attributes, so it is handled after creation below.
+      let attributes = Self.protectionAttributes(options?.fileProtection)
+      
+      do {
+        try fileManager.createDirectory(atPath: filepath, withIntermediateDirectories: true, attributes: attributes.isEmpty ? nil : attributes)
+        
+        // Handle excludedFromBackup after directory creation.
+        // Acting on presence rather than on `true` is deliberate: 3.x checked only that the key
+        // was supplied and forwarded whatever value it held (master:ios/RNFSManager.m:249-251),
+        // so `false` un-excludes a directory. Gating on `excludedFromBackup == true` made the
+        // flag one-way and silently dropped every `false`.
+        if let options = options, let excludedFromBackup = options.excludedFromBackup {
+          var url = URL(fileURLWithPath: filepath)
+          var resourceValues = URLResourceValues()
+          resourceValues.isExcludedFromBackup = excludedFromBackup
+          try url.setResourceValues(resourceValues)
+        }
+        
+        return // Return Void on success
+      } catch {
+        // Check if the error is because the file already exists and is a directory
+        // This is a common case and might not be considered an error by all libraries/users.
+        // For now, we will throw an error to be consistent with potential stricter error handling.
+        var isDir: ObjCBool = false
+        if fileManager.fileExists(atPath: filepath, isDirectory: &isDir) && isDir.boolValue {
+          // If it already exists and is a directory, some might consider this a success.
+          // However, createDirectory itself throws if it exists and is a file, or if it exists as a dir and withIntermediateDirectories is false.
+          // Since we use withIntermediateDirectories: true, it won\'t error if parent dirs exist.
+          // If the directory itself already exists, createDirectoryAtPath does not error out.
+          // So, we might not need this specific check unless we want to differentiate "created now" vs "already existed".
+          // For now, let\'s assume standard createDirectory behavior is fine.
+        }
+        throw RuntimeError.error(withMessage: "EMKDIR: Failed to create directory at path \(filepath): \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  func exists(filepath: String) -> Promise<Bool> {
+    return Promise<Bool>.async {
+      let fileManager = FileManager.default
+      // fileExists(atPath:) returns true if the file or directory exists, which is what we want.
+      // It doesn't throw an error, just returns false if not found or on other errors (like permission issues for a component of the path).
+      return fileManager.fileExists(atPath: filepath)
+    }
+  }
+  
+  public func unlink(filepath: String) throws -> Promise<Void> {
+    return Promise.async {
+      let fileManager = FileManager.default
+      // Nitro uses file:// scheme, remove it for direct file system access
+      let path = Self.normalizePath(filepath)
+      
+      guard fileManager.fileExists(atPath: path) else {
+        // 3.x rejected ENOENT here (master:ios/RNFSManager.m:213-214), and Android rejects
+        // ENOENT too, so resolving would leave the two platforms disagreeing on the same call.
+        throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(path)'")
+      }
+      
+      do {
+        try fileManager.removeItem(atPath: path)
+      } catch {
+        // Re-throw the error to be caught by Nitro and sent to JS
+        throw error
+      }
+    }
+  }
+  
+  // Helper function to normalize file paths by removing "file://" prefix if present
+  /// Maps the spec's `FileProtectionType` onto the `FileAttributeKey` dictionary that
+  /// `FileManager` accepts. Empty when no protection was requested, so callers can pass `nil`
+  /// through to APIs that treat an empty dictionary differently from an absent one.
+  private static func protectionAttributes(_ fileProtection: FileProtectionType?) -> [FileAttributeKey: Any] {
+    guard let fileProtection = fileProtection else { return [:] }
+
+    switch fileProtection {
+    case .nsfileprotectionnone:
+      return [.protectionKey: FileProtectionType.nsfileprotectionnone]
+    case .nsfileprotectioncomplete:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncomplete]
+    case .nsfileprotectioncompleteunlessopen:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncompleteunlessopen]
+    case .nsfileprotectioncompleteuntilfirstuserauthentication:
+      return [.protectionKey: FileProtectionType.nsfileprotectioncompleteuntilfirstuserauthentication]
+    @unknown default:
+      return [:]
+    }
+  }
+
+  /// Sets protection on an item that already exists. `moveItem`/`copyItem` take no attribute
+  /// dictionary, so protection has to follow the operation - as it did in 3.x
+  /// (master:ios/RNFSManager.m:417-425). A failure here is surfaced rather than swallowed,
+  /// because a caller that asked for protection and silently did not get it is worse than an
+  /// error.
+  private static func applyProtection(_ fileProtection: FileProtectionType?, toItemAtPath path: String) throws {
+    let attributes = protectionAttributes(fileProtection)
+    guard !attributes.isEmpty else { return }
+    try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
+  }
+
+  private static func normalizePath(_ path: String) -> String {
+    if path.hasPrefix("file://") {
+      return String(path.dropFirst("file://".count))
+    }
+    return path
+  }
+  
+  func readDir(dirPath: String) -> Promise<[ReadDirItem]> {
+    return Promise<[ReadDirItem]>.async {
+      let fileManager = FileManager.default
+      let normalizedDirPath = Self.normalizePath(dirPath)
+      var isDirObj: ObjCBool = false
+      
+      guard fileManager.fileExists(atPath: normalizedDirPath, isDirectory: &isDirObj) else {
+        throw RuntimeError.error(withMessage: "ENOENT: Directory not found at path: \(normalizedDirPath)")
+      }
+      guard isDirObj.boolValue else {
+        throw RuntimeError.error(withMessage: "ENOTDIR: Path is not a directory: \(normalizedDirPath)")
+      }
+      
+      do {
+        let itemNames = try fileManager.contentsOfDirectory(atPath: normalizedDirPath)
+        var dirItems: [ReadDirItem] = []
+        
+        for itemName in itemNames {
+          let itemPath = (normalizedDirPath as NSString).appendingPathComponent(itemName)
+          let attributes = try fileManager.attributesOfItem(atPath: itemPath)
+          
+          let name = itemName
+          let path = itemPath // Full path
+          let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+          let modificationDate = attributes[.modificationDate] as? Date
+          let creationDate = attributes[.creationDate] as? Date // Get creation date
+          let fileType = attributes[.type] as? FileAttributeType
+          
+          let isFile = (fileType == .typeRegular)
+          let isDirectory = (fileType == .typeDirectory)
+          let mtime = Int(modificationDate?.timeIntervalSince1970 ?? 0)
+          let ctime = Int(creationDate?.timeIntervalSince1970 ?? 0) // Convert creationDate to timestamp
+          
+          dirItems.append(ReadDirItem(name: name,
+                                      path: path,
+                                      size: Double(size),
+                                      isFile: isFile,
+                                      isDirectory: isDirectory,
+                                      mtime: Double(mtime),
+                                      ctime: Double(ctime)))
+        }
+        return dirItems
+      } catch {
+        throw RuntimeError.error(withMessage: "EREADDIR: Failed to read directory at path \(normalizedDirPath): \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  func stat(filepath: String) -> Promise<NativeStatResult> {
+    return Promise<NativeStatResult>.async {
+      let fileManager = FileManager.default
+      let normalizedFilepath = Self.normalizePath(filepath)
+      var isDirObj: ObjCBool = false
+      
+      guard fileManager.fileExists(atPath: normalizedFilepath, isDirectory: &isDirObj) else {
+        throw RuntimeError.error(withMessage: "ENOENT: File or directory not found at path: \(normalizedFilepath)")
+      }
+      
+      do {
+        let attributes = try fileManager.attributesOfItem(atPath: normalizedFilepath)
+        
+        let size = (attributes[.size] as? NSNumber)?.doubleValue ?? 0.0
+        let modificationDate = attributes[.modificationDate] as? Date
+        let creationDate = attributes[.creationDate] as? Date
+        let fileTypeAttr = attributes[.type] as? FileAttributeType
+        let fileMode = attributes[.posixPermissions] as? NSNumber
+        
+        let isDirectory = (fileTypeAttr == .typeDirectory)
+        let mtime = Double(modificationDate?.timeIntervalSince1970 ?? 0)
+        let ctime = Double(creationDate?.timeIntervalSince1970 ?? (modificationDate?.timeIntervalSince1970 ?? 0))
+        let type: StatResultType = isDirectory ? .directory : .file
+        
+        return NativeStatResult(
+          mode: fileMode?.doubleValue,
+          ctime: ctime,
+          mtime: mtime,
+          size: size,
+          type: type,
+          originalFilepath: normalizedFilepath
+        )
+      } catch {
+        throw RuntimeError.error(withMessage: "ESTAT: Failed to get stat for path \(normalizedFilepath): \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  func hash(filepath: String, algorithm: HashAlgorithm) -> Promise<String> {
+    return Promise<String>.async {
+      let normalizedFilepath = Self.normalizePath(filepath)
+      let fileManager = FileManager.default
+      var isDirObj: ObjCBool = false
+      
+      guard fileManager.fileExists(atPath: normalizedFilepath, isDirectory: &isDirObj) else {
+        throw RuntimeError.error(withMessage: "ENOENT: File not found at path: \(normalizedFilepath)")
+      }
+      
+      guard !isDirObj.boolValue else {
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot hash: \(normalizedFilepath)")
+      }
+      
+      let fileURL = URL(fileURLWithPath: normalizedFilepath)
+      
+      guard let fileData = try? Data(contentsOf: fileURL) else {
+        throw RuntimeError.error(withMessage: "EREAD: Could not read file data from path: \(normalizedFilepath)")
+      }
+      
+      var digest = [UInt8]()
+      let data = fileData as NSData
+      
+      switch algorithm {
+      case .md5:
+        digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
+        CC_MD5(data.bytes, CC_LONG(data.length), &digest)
+      case .sha1:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+        CC_SHA1(data.bytes, CC_LONG(data.length), &digest)
+      case .sha224:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA224_DIGEST_LENGTH))
+        CC_SHA224(data.bytes, CC_LONG(data.length), &digest)
+      case .sha256:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256(data.bytes, CC_LONG(data.length), &digest)
+      case .sha384:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA384_DIGEST_LENGTH))
+        CC_SHA384(data.bytes, CC_LONG(data.length), &digest)
+      case .sha512:
+        digest = [UInt8](repeating: 0, count: Int(CC_SHA512_DIGEST_LENGTH))
+        CC_SHA512(data.bytes, CC_LONG(data.length), &digest)
+        // default case should not be reached due to HashAlgorithm type enforcement from TypeScript
+      }
+      
+      return digest.map { String(format: "%02hhx", $0) }.joined()
+    }
+  }
+  
+  func moveFile(filepath: String, destPath: String, options: FileOptions?) -> Promise<Void> {
+    return Promise<Void>.async {
+      let fileManager = FileManager.default
+      let normalizedFilepath = Self.normalizePath(filepath)
+      let normalizedDestPath = Self.normalizePath(destPath)
+      
+      // Check if source exists
+      guard fileManager.fileExists(atPath: normalizedFilepath) else {
+        throw RuntimeError.error(withMessage: "ENOENT: Source file not found at path: \(normalizedFilepath)")
+      }
+      
+      // If destination is a directory, append the source filename to the destination path
+      var isDestDir: ObjCBool = false
+      var finalDestPath = normalizedDestPath
+      if fileManager.fileExists(atPath: normalizedDestPath, isDirectory: &isDestDir) && isDestDir.boolValue {
+        let sourceFileName = (normalizedFilepath as NSString).lastPathComponent
+        finalDestPath = (normalizedDestPath as NSString).appendingPathComponent(sourceFileName)
+      }
+      
+      // Ensure parent directory of destination exists
+      let destParentDir = (finalDestPath as NSString).deletingLastPathComponent
+      if !fileManager.fileExists(atPath: destParentDir) {
+        try fileManager.createDirectory(atPath: destParentDir, withIntermediateDirectories: true, attributes: nil)
+      }
+      
+      // Attempt to move the file
+      do {
+        // If a file/directory already exists at finalDestPath, removeItem first.
+        // This mimics the behavior of some `mv` commands (overwrite).
+        if fileManager.fileExists(atPath: finalDestPath) {
+          try fileManager.removeItem(atPath: finalDestPath)
+        }
+        try fileManager.moveItem(atPath: normalizedFilepath, toPath: finalDestPath)
+      } catch {
+        // Attempt to copy and delete if move fails (e.g., across different volumes)
+        // This is a common fallback strategy.
+        do {
+          if fileManager.fileExists(atPath: finalDestPath) { // If previous removeItem failed or this is a retry
+            try fileManager.removeItem(atPath: finalDestPath)
+          }
+          try fileManager.copyItem(atPath: normalizedFilepath, toPath: finalDestPath)
+          try fileManager.removeItem(atPath: normalizedFilepath) // Delete original after successful copy
+        } catch let fallbackError {
+          // If both move and copy-delete fail, throw an error reflecting the move operation
+          throw RuntimeError.error(withMessage: "EMOVE: Failed to move file from \(normalizedFilepath) to \(finalDestPath). Move error: \(error.localizedDescription). Fallback copy error: \(fallbackError.localizedDescription)")
+        }
+      }
+
+      // Deliberately outside the do/catch above: the fallback branch deletes finalDestPath
+      // before retrying, so a protection failure raised inside it would destroy the file that
+      // had just been moved successfully.
+      try Self.applyProtection(options?.fileProtection, toItemAtPath: finalDestPath)
+      return // Return Void on success
+    }
+  }
+  
+  func copyFile(filepath: String, destPath: String, options: FileOptions?) -> Promise<Void> {
+    return Promise<Void>.async {
+      let fileManager = FileManager.default
+      let normalizedFilepath = Self.normalizePath(filepath)
+      let normalizedDestPath = Self.normalizePath(destPath)
+      
+      // Check if source exists
+      guard fileManager.fileExists(atPath: normalizedFilepath) else {
+        throw RuntimeError.error(withMessage: "ENOENT: Source file not found at path: \(normalizedFilepath)")
+      }
+      
+      // If destination is a directory, append the source filename to the destination path
+      var isDestDir: ObjCBool = false
+      var finalDestPath = normalizedDestPath
+      if fileManager.fileExists(atPath: normalizedDestPath, isDirectory: &isDestDir) && isDestDir.boolValue {
+        let sourceFileName = (normalizedFilepath as NSString).lastPathComponent
+        finalDestPath = (normalizedDestPath as NSString).appendingPathComponent(sourceFileName)
+      }
+      
+      // Ensure parent directory of destination exists
+      let destParentDir = (finalDestPath as NSString).deletingLastPathComponent
+      if !fileManager.fileExists(atPath: destParentDir) {
+        try fileManager.createDirectory(atPath: destParentDir, withIntermediateDirectories: true, attributes: nil)
+      }
+      
+      // Attempt to copy the file
+      do {
+        // If a file/directory already exists at finalDestPath, removeItem first.
+        // This mimics the behavior of some `cp` commands (overwrite).
+        if fileManager.fileExists(atPath: finalDestPath) {
+          try fileManager.removeItem(atPath: finalDestPath)
+        }
+        try fileManager.copyItem(atPath: normalizedFilepath, toPath: finalDestPath)
+      } catch {
+        throw RuntimeError.error(withMessage: "ECOPY: Failed to copy file from \(normalizedFilepath) to \(finalDestPath): \(error.localizedDescription)")
+      }
+
+      // Outside the do/catch so a protection failure is not reported as a copy failure.
+      try Self.applyProtection(options?.fileProtection, toItemAtPath: finalDestPath)
+      return // Return Void on success
+    }
+  }
+  
+  func appendFile(filepath: String, data: ArrayBuffer) -> Promise<Void> {
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous
+    // call; ones that already own their memory need no copy at all.
+    let copiedBuffer = data.asOwning()
+    
+    return Promise<Void>.async {
+      let normalizedPath = Self.normalizePath(filepath)
+      let fileManager = FileManager.default
+      
+      var isDir: ObjCBool = false
+      if fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) && isDir.boolValue {
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot append: \(normalizedPath)")
+      }
+      
+      let fileData = copiedBuffer.toData(copyIfNeeded: true)
+      
+      if let fileHandle = FileHandle(forUpdatingAtPath: normalizedPath) {
+        defer {
+          do {
+            try fileHandle.close()
+          } catch {
+            // Log error or handle, though primary write error is caught below
+            print("Error closing file handle for append: \(error.localizedDescription)")
+          }
+        }
+        do {
+          try fileHandle.seekToEnd()
+          try fileHandle.write(contentsOf: fileData)
+          return
+        } catch {
+          throw RuntimeError.error(withMessage: "EAPPEND: Failed to append data to file \(normalizedPath): \(error.localizedDescription)")
+        }
+      } else {
+        // File does not exist, create it and write data (same as writeFile essentially)
+        do {
+          // Ensure parent directory exists
+          let parentDirectoryURL = URL(fileURLWithPath: normalizedPath).deletingLastPathComponent()
+          if !fileManager.fileExists(atPath: parentDirectoryURL.path) {
+            try fileManager.createDirectory(at: parentDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+          }
+          try fileData.write(to: URL(fileURLWithPath: normalizedPath))
+          return
+        } catch {
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to create and write file at path \(normalizedPath) during append operation: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+  
+  func getFSInfo() -> Promise<FSInfoResult> {
+    return Promise<FSInfoResult>.async {
+      let fileManager = FileManager.default
+      // Get the path to the app's documents directory, which is part of the sandbox.
+      // File system attributes are typically queried against a path within the target file system.
+      guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        throw RuntimeError.error(withMessage: "EPATH: Could not determine documents directory path.")
+      }
+      
+      do {
+        let attributes = try fileManager.attributesOfFileSystem(forPath: documentsDirectory.path)
+        let totalSpace = attributes[.systemSize] as? NSNumber
+        let freeSpace = attributes[.systemFreeSize] as? NSNumber
+        
+        guard let total = totalSpace, let free = freeSpace else {
+          throw RuntimeError.error(withMessage: "EATTR: Could not retrieve file system size attributes.")
+        }
+        
+        // totalSpaceEx/freeSpaceEx describe Android external storage and have no iOS
+        // equivalent - the sandbox sits on the one volume already reported above.
+        return FSInfoResult(
+          totalSpace: total.doubleValue,
+          freeSpace: free.doubleValue,
+          totalSpaceEx: nil,
+          freeSpaceEx: nil
+        )
+      } catch {
+        throw RuntimeError.error(withMessage: "EFSINFO: Failed to get file system info: \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  func read(filepath: String, length: Double, position: Double) -> Promise<ArrayBuffer> {
+    return Promise<ArrayBuffer>.async {
+      // `UInt64(position)`/`Int(length)` below trap on a negative, NaN or infinite double,
+      // which aborts the process instead of rejecting. `write` already guards its position.
+      guard position.isFinite, position >= 0 else {
+        throw RuntimeError.error(withMessage: "EINVAL: position must be a non-negative finite number, got \(position)")
+      }
+      guard length.isFinite, length >= 0 else {
+        throw RuntimeError.error(withMessage: "EINVAL: length must be a non-negative finite number, got \(length)")
+      }
+
+      let normalizedPath = Self.normalizePath(filepath)
+      let fileManager = FileManager.default
+
+      var isDir: ObjCBool = false
+      guard fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) else {
+        throw RuntimeError.error(withMessage: "ENOENT: File not found at path: \(normalizedPath)")
+      }
+      
+      guard !isDir.boolValue else {
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot read: \(normalizedPath)")
+      }
+      
+      if let fileHandle = FileHandle(forReadingAtPath: normalizedPath) {
+        defer {
+          do {
+            try fileHandle.close()
+          } catch {
+            print("Error closing file handle: \(error.localizedDescription)")
+          }
+        }
+        
+        do {
+          // Seek to the specified position
+          try fileHandle.seek(toOffset: UInt64(position))
+          
+          // Read the specified number of bytes
+          let data = try fileHandle.read(upToCount: Int(length)) ?? Data()
+          
+          // Convert to ArrayBuffer and return
+          let arrayBufferHolder = try ArrayBuffer.copy(data: data)
+          return arrayBufferHolder
+        } catch {
+          throw RuntimeError.error(withMessage: "EREAD: Failed to read file at path \(normalizedPath): \(error.localizedDescription)")
+        }
+      } else {
+        throw RuntimeError.error(withMessage: "EOPEN: Failed to open file at path \(normalizedPath)")
+      }
+    }
+  }
+  
+  func write(filepath: String, data: ArrayBuffer, position: Double?) -> Promise<Void> {
+    // Buffers arriving from JS are non-owning and unsafe past this synchronous call, so the
+    // copy has to happen here rather than inside the async closure below. Reading it there
+    // trapped in `toData(copyIfNeeded:)` on every call. Same treatment as `writeFile`.
+    let copiedBuffer = data.asOwning()
+
+    return Promise<Void>.async {
+      let normalizedPath = Self.normalizePath(filepath)
+      let fileManager = FileManager.default
+
+      var isDir: ObjCBool = false
+      if fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) && isDir.boolValue {
+        throw RuntimeError.error(withMessage: "EISDIR: Path is a directory, cannot write: \(normalizedPath)")
+      }
+
+      let fileData = copiedBuffer.toData(copyIfNeeded: false)
+
+      // If file doesn't exist, create it with the data and return
+      if !fileManager.fileExists(atPath: normalizedPath) {
+        let parentDirectoryURL = URL(fileURLWithPath: normalizedPath).deletingLastPathComponent()
+        if !fileManager.fileExists(atPath: parentDirectoryURL.path) {
+          do {
+            try fileManager.createDirectory(at: parentDirectoryURL, withIntermediateDirectories: true, attributes: nil)
+          } catch {
+            throw RuntimeError.error(withMessage: "EMKDIRP: Failed to create parent directories for path \(normalizedPath): \(error.localizedDescription)")
+          }
+        }
+        let success = fileManager.createFile(atPath: normalizedPath, contents: fileData, attributes: nil)
+        if !success {
+          throw RuntimeError.error(withMessage: "ENOENT: no such file or directory, open '\(normalizedPath)'")
+        }
+        return
+      }
+      
+      // File exists, open for updating
+      if let fileHandle = FileHandle(forUpdatingAtPath: normalizedPath) {
+        defer {
+          do {
+            try fileHandle.close()
+          } catch {
+            print("Error closing file handle: \(error.localizedDescription)")
+          }
+        }
+        
+        do {
+          if let pos = position, pos >= 0 {
+            try fileHandle.seek(toOffset: UInt64(pos))
+          } else {
+            try fileHandle.seekToEnd()
+          }
+          try fileHandle.write(contentsOf: fileData)
+          return
+        } catch {
+          throw RuntimeError.error(withMessage: "EWRITE: Failed to write data to file \(normalizedPath): \(error.localizedDescription)")
+        }
+      } else {
+        throw RuntimeError.error(withMessage: "EOPEN: Failed to open file at path \(normalizedPath)")
+      }
+    }
+  }
+  
+  func touch(filepath: String, mtime: Double?, ctime: Double?) -> Promise<Void> {
+    return Promise<Void>.async {
+      let fileManager = FileManager.default
+      let normalizedPath = Self.normalizePath(filepath)
+      var isDir: ObjCBool = false
+      
+      guard fileManager.fileExists(atPath: normalizedPath, isDirectory: &isDir) else {
+        throw RuntimeError.error(withMessage: "ENOENT: no such file, open '\(normalizedPath)'")
+      }
+      
+      var attributes = [FileAttributeKey: Any]()
+      
+      if let mtimeValue = mtime {
+        let mtimeDate = Date(timeIntervalSince1970: mtimeValue / 1000) // Convert from milliseconds to seconds
+        attributes[.modificationDate] = mtimeDate
+      }
+      
+      if let ctimeValue = ctime {
+        let ctimeDate = Date(timeIntervalSince1970: ctimeValue / 1000) // Convert from milliseconds to seconds
+        attributes[.creationDate] = ctimeDate
+      }
+      
+      do {
+        try fileManager.setAttributes(attributes, ofItemAtPath: normalizedPath)
+        return
+      } catch {
+        throw RuntimeError.error(withMessage: "ETOUCH: Failed to touch file at path \(normalizedPath): \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  // Download Functionality
+  func downloadFile(
+    options: DownloadFileOptions,
+    headers: [String: String]?
+  ) -> Promise<Double> {
+    return Promise<Double>.async {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double, Error>) in
+        let processedHeaders: [String: String]? = headers
+
+        guard let url = URL(string: options.fromUrl) else {
+          let errorEvent = DownloadEventResult(
+            jobId: -1,
+            headers: nil,
+            contentLength: nil,
+            statusCode: nil,
+            bytesWritten: nil,
+            error: "Invalid URL: \(options.fromUrl)"
+          )
+          
+          self.downloaderQueue.sync {
+            for cb in self.errorListeners.values {
+              cb(errorEvent)
+            }
+          }
+          continuation.resume(throwing: NSError(domain: "RNFS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(options.fromUrl)"]))
+          
+          return
+        }
+
+        let jobId = Int(options.jobId)
+        let downloader = Downloader()
+        downloader.delegate = self
+        
+        self.downloaderQueue.sync {
+          self.downloaders[jobId] = downloader
+          self.downloadContinuations[jobId] = continuation
+        }
+        
+        downloader.startDownload(from: url, to: options.toFile, headers: processedHeaders, options: options)
+      }
+    }
+  }
+  
+  func stopDownload(jobId: Double) -> Promise<Void> {
+    return Promise<Void>.async {
+      let intJobId = Int(jobId)
+      self.downloaderQueue.sync {
+        if let downloader = self.downloaders[intJobId] {
+          downloader.stopDownload()
+        }
+      }
+    }
+  }
+  
+  func resumeDownload(jobId: Double) -> Promise<Void> {
+    return Promise<Void>.async {
+      let intJobId = Int(jobId)
+      self.downloaderQueue.sync {
+        self.downloaders[intJobId]?.resumeDownload()
+      }
+    }
+  }
+  
+  func isResumable(jobId: Double) -> Promise<Bool> {
+    return Promise<Bool>.async {
+      let intJobId = Int(jobId)
+      return self.downloaderQueue.sync {
+        self.downloaders[intJobId]?.isResumable() ?? false
+      }
+    }
+  }
+
+  // download listeners
+  func listenToDownloadBegin(jobId: Double, onDownloadBegin: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    if let cb = onDownloadBegin {
+      self.downloaderQueue.sync { self.beginListeners[jobId] = cb }
+    }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.beginListeners.removeValue(forKey: jobId) } }
+  }
+
+  func listenToDownloadProgress(jobId: Double, onDownloadProgress: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    if let cb = onDownloadProgress {
+      self.downloaderQueue.sync { self.progressListeners[jobId] = cb }
+    }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.progressListeners.removeValue(forKey: jobId) } }
+  }
+
+  func listenToDownloadComplete(jobId: Double, onDownloadComplete: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    if let cb = onDownloadComplete {
+      self.downloaderQueue.sync { self.completeListeners[jobId] = cb }
+    }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.completeListeners.removeValue(forKey: jobId) } }
+  }
+
+  func listenToDownloadError(jobId: Double, onDownloadError: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    if let cb = onDownloadError {
+      self.downloaderQueue.sync { self.errorListeners[jobId] = cb }
+    }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.errorListeners.removeValue(forKey: jobId) } }
+  }
+
+  func listenToDownloadCanBeResumed(jobId: Double, onDownloadCanBeResumed: ((DownloadEventResult) -> Void)?) -> (() -> Void) {
+    if let cb = onDownloadCanBeResumed {
+      self.downloaderQueue.sync { self.canBeResumedListeners[jobId] = cb }
+    }
+    return { [weak self] in self?.downloaderQueue.sync { _ = self?.canBeResumedListeners.removeValue(forKey: jobId) } }
+  }
+
+  // misc
+  // Android-only. 3.x had no iOS implementation at all, so these threw a TypeError at the
+  // call site; rejecting ENOTSUP keeps them loud and says why, and matches the iOS MediaStore
+  // stubs. Resolving [] would read as "the scan found nothing".
+  func scanFile(path: String) -> Promise<[String]> {
+    return Promise<[String]>.async {
+      throw RuntimeError.error(withMessage: "ENOTSUP: scanFile is not supported on iOS")
+    }
+  }
+
+  func getAllExternalFilesDirs() -> Promise<[String]> {
+    return Promise<[String]>.async {
+      throw RuntimeError.error(withMessage: "ENOTSUP: getAllExternalFilesDirs is not supported on iOS")
+    }
+  }
+}
+
+// MARK: - DownloaderDelegate
+
+extension Fs2: DownloaderDelegate {
+  func downloadDidBegin(jobId: Int, contentLength: Int64, headers: [AnyHashable: Any]?) {
+    let headersDict = headers ?? [:]
+    let tempHeaderMap = AnyMap()
+
+    for (key, value) in headersDict {
+      if let keyStr = key as? String, let valueStr = value as? String {
+        tempHeaderMap.setString(key: keyStr, value: valueStr)
+      }
+    }
+
+    let event = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: tempHeaderMap,
+      contentLength: Double(contentLength),
+      statusCode: nil,
+      bytesWritten: nil,
+      error: nil
+    )
+
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.beginListeners[Double(jobId)]
+    }
+    listener?(event)
+  }
+
+  func downloadDidProgress(jobId: Int, contentLength: Int64, bytesWritten: Int64) {
+    let event = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: nil,
+      contentLength: Double(contentLength),
+      statusCode: nil,
+      bytesWritten: Double(bytesWritten),
+      error: nil
+    )
+
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.progressListeners[Double(jobId)]
+    }
+    listener?(event)
+  }
+
+  func downloadDidComplete(jobId: Int, statusCode: Int, bytesWritten: Int64) {
+    let result = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: nil,
+      contentLength: nil,
+      statusCode: Double(statusCode),
+      bytesWritten: Double(bytesWritten),
+      error: nil
+    )
+
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.completeListeners[Double(jobId)]
+    }
+    listener?(result)
+  }
+
+  func downloadDidError(jobId: Int, error: Error) {
+    let event = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: nil,
+      contentLength: nil,
+      statusCode: nil,
+      bytesWritten: nil,
+      error: error.localizedDescription
+    )
+
+    var listener: ((DownloadEventResult) -> Void)?
+    var continuation: CheckedContinuation<Double, Error>?
+    self.downloaderQueue.sync {
+      listener = self.errorListeners[Double(jobId)]
+      // Take the continuation here so `downloadCleanup`'s defer cannot resolve it afterwards.
+      // Without this the promise resolved successfully for every failed download - a 404, a
+      // DNS failure, a write error - because cleanup resumes whatever is still registered.
+      continuation = self.downloadContinuations.removeValue(forKey: jobId)
+    }
+    listener?(event)
+    continuation?.resume(throwing: error)
+  }
+
+  func downloadCanBeResumed(jobId: Int) {
+    let event = DownloadEventResult(
+      jobId: Double(jobId),
+      headers: nil,
+      contentLength: nil,
+      statusCode: nil,
+      bytesWritten: nil,
+      error: nil
+    )
+    var listener: ((DownloadEventResult) -> Void)?
+    self.downloaderQueue.sync {
+      listener = self.canBeResumedListeners[Double(jobId)]
+    }
+    listener?(event)
+  }
+
+  // Always called in a defer/finally block from Downloader
+  func downloadCleanup(jobId: Int) {
+    self.downloaderQueue.sync {
+      if self.downloaders[jobId]?.isResumable() != true {
+        self.downloaders.removeValue(forKey: jobId)
+      }
+      // Remove and resolve/reject continuation if still present (should be nil if already handled)
+      if let continuation = self.downloadContinuations.removeValue(forKey: jobId) {
+        // Defensive: always resolve if not already
+        continuation.resume(returning: Double(jobId))
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": [
+    "fs2"
+  ],
+  "ios": {
+    "iosModuleName": "RNFS2"
+  },
+  "android": {
+    "androidNamespace": [
+      "fs2"
+    ],
+    "androidCxxLibName": "fs2"
+  },
+  "autolinking": {
+    "Fs2": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "Fs2"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "Fs2"
+      }
+    },
+    "MediaStore": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "MediaStore"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "MediaStore"
+      }
+    },
+    "Fs2Stream": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "Fs2Stream"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "Fs2Stream"
+      }
+    }
+  },
+  "ignorePaths": [
+    "**/node_modules"
+  ]
+}
