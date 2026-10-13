@@ -48,7 +48,7 @@ npm i --save react-native-nitro-modules
 Changes can be found in [CHANGELOG.md](CHANGELOG.md)
 
 ### Upgrading
-Migrating from v3.x to v4.x? See [UPGRADE.md](UPGRADE.md).
+Migrating from v3.x to v4.x? See [UPGRADING.md](UPGRADING.md).
 
 ### What's New in 4.x
 
@@ -58,7 +58,7 @@ Migrating from v3.x to v4.x? See [UPGRADE.md](UPGRADE.md).
 - **ArrayBuffer Built-in**: Native ArrayBuffer support without additional dependencies
 - **Backward Compatible API**: Most existing code works without changes!
 
-> **Note**: v4.x requires `react-native-nitro-modules` as a peer dependency. Coming from 3.x? Read [UPGRADE.md](./UPGRADE.md).
+> **Note**: v4.x requires `react-native-nitro-modules` as a peer dependency. Coming from 3.x? Read [UPGRADING.md](./UPGRADING.md).
 
 ## Usage
 ```ts
@@ -381,7 +381,7 @@ await stream.close();
 import { MediaStore } from 'react-native-fs2';
 ```
 
-> Upgrading from 3.x? `RNFS.MediaStore` is gone — see [UPGRADE.md](./UPGRADE.md).
+> Upgrading from 3.x? `RNFS.MediaStore` is gone — see [UPGRADING.md](./UPGRADING.md).
 
 ### RNFS2 can now interact with the MediaStore on Android. This allows you to add, delete, and update media files in the MediaStore.
 
