@@ -1,5 +1,8 @@
 # Changelog
 
+# v4.0.1 (October 27, 2026)
+ * [#146](https://github.com/sourcetoad/react-native-fs2/pull/146) - Fix Android 10 MediaStore bug with pending intent of a file.
+
 # v4.0.0 (September 15, 2026)
  * Rewritten on [Nitro Modules](https://nitro.margelo.com) — direct JSI bindings, end-to-end type safety.
  * New file streaming API (beta) for large files, see [FILE_STREAM.md](./docs/FILE_STREAM.md).
