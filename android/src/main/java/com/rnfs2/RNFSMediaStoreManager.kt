@@ -169,18 +169,25 @@ class RNFSMediaStoreManager {
             throw IORejectionException("ENOENT", "Source not accessible: $path")
         }
         val fileUri = createMediaFile(file, mediaType)
+        // Android 10 hides pending items from every caller, including the owner, unless the
+        // Uri opts in. Android 11+ always shows the owner its own pending items.
+        @Suppress("DEPRECATION")
+        val pendingUri =
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) MediaStore.setIncludePending(fileUri)
+            else fileUri
+
         try {
             val pendingValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 1) }
-            if (resolver.update(fileUri, pendingValues, null, null) == 0) {
+            if (resolver.update(pendingUri, pendingValues, null, null) == 0) {
                 throw IOException(
                     "Failed to mark media file as pending (0 rows updated)."
                 )
             }
-            val writeSuccessful = writeToMediaFile(fileUri, path, false)
+            val writeSuccessful = writeToMediaFile(pendingUri, path, false)
             if (writeSuccessful) {
                 val commitValues =
                     ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                if (resolver.update(fileUri, commitValues, null, null) > 0) {
+                if (resolver.update(pendingUri, commitValues, null, null) > 0) {
                     return fileUri
                 } else {
                     throw IOException(
@@ -191,7 +198,7 @@ class RNFSMediaStoreManager {
                 throw IOException("Failed to write file to MediaStore.")
             }
         } catch (e: Exception) {
-            cleanupMediaStoreEntry(fileUri, resolver)
+            cleanupMediaStoreEntry(pendingUri, resolver)
             throw IOException("Unexpected error during copyToMediaStore: ${e.message}", e)
         }
     }
