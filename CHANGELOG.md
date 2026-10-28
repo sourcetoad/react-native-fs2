@@ -1,5 +1,8 @@
 # Changelog
 
+# v4.0.2 (October 28, 2026)
+ * [#155](https://github.com/sourcetoad/react-native-fs2/pull/155) - Improve Android 10 (Samsung) MediaStore handling.
+
 # v4.0.1 (October 27, 2026)
  * [#146](https://github.com/sourcetoad/react-native-fs2/pull/146) - Fix Android 10 MediaStore bug with pending intent of a file.
 
