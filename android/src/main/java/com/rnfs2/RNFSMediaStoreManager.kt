@@ -66,7 +66,14 @@ class RNFSMediaStoreManager {
         }
     }
 
-    fun createMediaFile(file: FileDescription, mediaType: MediaCollectionType): Uri {
+    fun createMediaFile(file: FileDescription, mediaType: MediaCollectionType): Uri =
+        insertMediaRow(file, mediaType, insertPending = false)
+
+    private fun insertMediaRow(
+        file: FileDescription,
+        mediaType: MediaCollectionType,
+        insertPending: Boolean
+    ): Uri {
         val resolver = context.contentResolver
         val fileDetails =
             ContentValues().apply {
@@ -78,6 +85,7 @@ class RNFSMediaStoreManager {
                     MediaStore.MediaColumns.RELATIVE_PATH,
                     getRelativePath(mediaType) + '/' + file.parentFolder
                 )
+                if (insertPending) put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         val mediaUri =
             getMediaUri(mediaType)
@@ -168,26 +176,26 @@ class RNFSMediaStoreManager {
         } catch (e: IOException) {
             throw IORejectionException("ENOENT", "Source not accessible: $path")
         }
-        val fileUri = createMediaFile(file, mediaType)
-        // Android 10 hides pending items from every caller, including the owner, unless the
-        // Uri opts in. Android 11+ always shows the owner its own pending items.
-        @Suppress("DEPRECATION")
-        val pendingUri =
-            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) MediaStore.setIncludePending(fileUri)
-            else fileUri
+        // Samsung's Android 10 MediaProvider makes a row inaccessible to its owner once a separate
+        // update flips it to pending (setIncludePending doesn't help), so on Q the row is inserted
+        // already pending.
+        val insertPending = Build.VERSION.SDK_INT == Build.VERSION_CODES.Q
+        val fileUri = insertMediaRow(file, mediaType, insertPending)
 
         try {
-            val pendingValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 1) }
-            if (resolver.update(pendingUri, pendingValues, null, null) == 0) {
-                throw IOException(
-                    "Failed to mark media file as pending (0 rows updated)."
-                )
+            if (!insertPending) {
+                val pendingValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 1) }
+                if (resolver.update(fileUri, pendingValues, null, null) == 0) {
+                    throw IOException(
+                        "Failed to mark media file as pending (0 rows updated)."
+                    )
+                }
             }
-            val writeSuccessful = writeToMediaFile(pendingUri, path, false)
+            val writeSuccessful = writeToMediaFile(fileUri, path, false)
             if (writeSuccessful) {
                 val commitValues =
                     ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                if (resolver.update(pendingUri, commitValues, null, null) > 0) {
+                if (resolver.update(fileUri, commitValues, null, null) > 0) {
                     return fileUri
                 } else {
                     throw IOException(
@@ -198,7 +206,7 @@ class RNFSMediaStoreManager {
                 throw IOException("Failed to write file to MediaStore.")
             }
         } catch (e: Exception) {
-            cleanupMediaStoreEntry(pendingUri, resolver)
+            cleanupMediaStoreEntry(fileUri, resolver)
             throw IOException("Unexpected error during copyToMediaStore: ${e.message}", e)
         }
     }
