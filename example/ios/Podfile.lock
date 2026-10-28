@@ -1696,7 +1696,7 @@ PODS:
     - React-utils (= 0.87.1)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.87.1)
-  - RNFS2 (4.0.1):
+  - RNFS2 (4.0.2):
     - hermes-engine
     - NitroModules
     - RCTRequired
@@ -2081,7 +2081,7 @@ SPEC CHECKSUMS:
   ReactCodegen: 13d2ebfe2d8f1200052509b4fc4abf7a6825a7fc
   ReactCommon: 749169e12aa3461a3df3656a00e48dbe0456b2d6
   ReactNativeDependencies: 94c922c39e0e6150ee9ad05e2ca1946e0ef55783
-  RNFS2: 6dab5cf472ec2d470b4ac4baa8f325fc2e20f6af
+  RNFS2: 00283a036f53e9c558ba14513b7a0186571d1a6f
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
